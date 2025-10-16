@@ -199,7 +199,7 @@ namespace FunctionApp1
         }
 
         // CORS dinámico
-        private static void AddCors(HttpResponseData resp, HttpRequestData req)
+        public static void AddCors(HttpResponseData resp, HttpRequestData req)
 {
     var origin = GetAllowedOrigin(req);
     if (!string.IsNullOrEmpty(origin))
