@@ -1,0 +1,22 @@
+﻿# Visual Studio
+.vs/
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build
+**/bin/
+**/obj/
+
+# VS Code
+.vscode/
+
+# SO
+.DS_Store
+Thumbs.db
+
+# Azure Functions (secretos locales)
+local.settings.json
+**/local.settings.json
