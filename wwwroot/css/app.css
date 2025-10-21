@@ -392,3 +392,115 @@ body {
         overflow: hidden;
         text-overflow: ellipsis
     }
+/* ====== Vista previa (mejor contraste) ====== */
+.df-preview {
+    background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 14px;
+    box-shadow: 0 12px 28px rgba(0,0,0,.35);
+    padding: 16px;
+    backdrop-filter: blur(4px);
+}
+
+    /* Cabecera de tabla más clara y “pegajosa” */
+    .df-preview table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: rgba(255,255,255,.12);
+        color: #eaf1ff;
+        border-bottom: 1px solid rgba(255,255,255,.18);
+    }
+
+    /* Filas: ligera separación y hover */
+    .df-preview table tbody tr {
+        border-top: 1px solid rgba(255,255,255,.10);
+    }
+
+        .df-preview table tbody tr:hover {
+            background: rgba(255,255,255,.05);
+        }
+
+    /* Números alineados y un poco más vivos */
+    .df-preview .text-end {
+        color: #e6eeff;
+        font-variant-numeric: tabular-nums;
+    }
+/* ---- Vista previa (tarjeta clara, borde y sombra) ---- */
+.df-preview {
+    background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 16px;
+    box-shadow: 0 10px 28px rgba(0,0,0,.28);
+    backdrop-filter: blur(3px);
+}
+
+    /* Tabla legible sobre fondo oscuro */
+    .df-preview .table {
+        color: #e9efff;
+        margin-bottom: 12px;
+    }
+
+        .df-preview .table thead th {
+            background: #1a2847; /* azul más claro */
+            color: #dbe9ff;
+            border-color: rgba(255,255,255,.14);
+        }
+
+        .df-preview .table td,
+        .df-preview .table th {
+            border-color: rgba(255,255,255,.10);
+        }
+
+    .df-preview .table-striped > tbody > tr:nth-of-type(odd) > * {
+        background-color: rgba(255,255,255,.03);
+    }
+
+    .df-preview .table-hover tbody tr:hover > * {
+        background-color: rgba(100,150,255,.10);
+    }
+
+    .df-preview .text-muted {
+        color: #a8b7de !important;
+    }
+.df-uploader {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin: 10px 0 14px;
+}
+
+.df-filepick {
+    position: relative;
+    display: inline-block;
+}
+
+    .df-filepick input[type=file] {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+    }
+
+.df-filebtn {
+    min-width: 240px;
+}
+
+.df-drop {
+    position: relative;
+    border: 1px dashed rgba(255,255,255,.22);
+    border-radius: 14px;
+    background: rgba(0,0,0,.15);
+    padding: 28px;
+    text-align: center;
+    color: #b9c3e6;
+    margin: 8px 0 12px;
+    transition: .15s ease;
+}
+
+    .df-drop.drag {
+        border-color: var(--df-primary);
+        box-shadow: 0 0 0 2px rgba(78,143,255,.35) inset,0 6px 22px rgba(78,143,255,.25);
+        background: rgba(78,143,255,.08);
+        color: #e8efff;
+    }

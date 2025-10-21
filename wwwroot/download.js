@@ -1,28 +1,20 @@
 ﻿// wwwroot/download.js
-// Descarga mediante Blob (mejor para archivos grandes que data:URI)
-window.downloadFileFromBytes = (fileName, base64) => {
+window.downloadFileFromBytes = (fileName, base64Data) => {
     try {
-        const byteChars = atob(base64);
-        const byteNumbers = new Array(byteChars.length);
-        for (let i = 0; i < byteChars.length; i++) {
-            byteNumbers[i] = byteChars.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob(
-            [byteArray],
-            { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
-        );
+        const byteCharacters = atob(base64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
+        const blob = new Blob([new Uint8Array(byteNumbers)], { type: "application/octet-stream" });
 
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = fileName || "archivo.xlsx";
+        a.download = fileName || "archivo.bin";
         document.body.appendChild(a);
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
     } catch (e) {
-        console.error("downloadFileFromBytes error:", e);
-        alert("No se pudo iniciar la descarga.");
+        console.error("downloadFileFromBytes error", e);
     }
 };
