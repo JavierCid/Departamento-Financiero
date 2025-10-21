@@ -53,7 +53,7 @@
 
 @if (_preview is not null && _preview.Muestra.Count > 0)
 {
-    <div class="card df-card p-3 mt-3">
+    <div class="df-preview card df-card p-3 mt-3">
         <h5 class="mb-3">Vista previa</h5>
         <table class="table table-sm table-striped table-hover" style="font-size:.95rem">
             <thead class="table-primary">
@@ -97,7 +97,7 @@ else if (!string.IsNullOrWhiteSpace(_previewJson))
 
 @code {
     // -------- Config --------
-    const string EndpointPdf = "http://127.0.0.1:8001/api/pdf2excel";
+    const string EndpointPdf = "http://127.0.0.1:8000/api/pdf2excel";
 
     // -------- Estado --------
     List<IBrowserFile> _files = new();
