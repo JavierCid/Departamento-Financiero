@@ -49,60 +49,61 @@ body {
     margin: 0 auto
 }
 
-/* ====== Header (navbar + logo) ====== */
+/* ===== Navbar compacto + Logo grande (proporcional) ===== */
+
+/* Barra con altura contenida */
 .df-header {
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    background: var(--df-header); /* exacto al fondo del logo */
+    background: var(--df-header);
     border-bottom: 1px solid var(--df-border);
     box-shadow: 0 8px 24px rgba(0,0,0,.25);
+    overflow: visible; /* deja que el logo sobresalga un poco */
 }
 
+/* Fila compacta: ~56px de alto visual */
 .df-header__inner {
     max-width: 1200px;
     margin: 0 auto;
-    padding: 14px 24px; /* fila compacta */
+    padding: 6px 22px; /* <— reduce alto de barra */
     display: flex;
     align-items: center;
     justify-content: space-between;
+    min-height: 56px;
 }
 
-.df-brand {
-    color: #e8efff;
-    text-decoration: none;
-    font-weight: 700;
-    font-size: 18px;
-    letter-spacing: .3px;
-    display: flex;
-    gap: 12px;
-    align-items: center;
-}
-
-    .df-brand:hover {
-        opacity: .92
-    }
-
-/* Logo (+20%) */
+/* Logo 20% más grande y SIEMPRE proporcional */
 .df-logo {
-    height: 72px;
-    width: auto;
-    margin-right: 12px;
-    vertical-align: middle;
+    height: 40px; /* -20% respecto a 84px */
+    width: auto; /* mantiene proporción, nunca se deforma */
     object-fit: contain;
+    display: block;
+    margin-top: -12px; /* sobresale para que la barra sea más baja */
+    margin-bottom: -12px; /* idem */
 }
 
-/* Nav */
+/* Texto de marca, sin “estirar” la fila */
+.df-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    color: #e8efff;
+    font-weight: 700;
+    letter-spacing: .3px;
+    line-height: 1; /* evita que la línea suba la altura */
+}
+
+/* Links del menú: más finos para compactar */
 .df-nav {
     display: flex;
-    gap: 8px
+    gap: 8px;
 }
 
 .df-nav__link {
     color: #d8e3ff;
     text-decoration: none;
     font-weight: 500;
-    padding: 8px 14px;
+    font-size: 15px; /* un pelín menor */
+    padding: 6px 12px; /* <— menos alto */
     border-radius: 10px;
     border: 1px solid transparent;
     transition: .15s ease;
@@ -110,13 +111,14 @@ body {
 
     .df-nav__link:hover {
         border-color: rgba(255,255,255,.18);
-        background: rgba(255,255,255,.06)
+        background: rgba(255,255,255,.06);
     }
 
     .df-nav__link.active {
         background: rgba(255,255,255,.12);
-        border-color: rgba(255,255,255,.22)
+        border-color: rgba(255,255,255,.22);
     }
+
 
 /* ====== Hero ====== */
 .df-hero {
