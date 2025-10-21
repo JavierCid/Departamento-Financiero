@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Departamento Financiero", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FunctionApp1", "FunctionApp1\FunctionApp1.csproj", "{245563A0-C1B9-3806-EC0F-1C822C9D34F0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FastApiLauncher", "..\FastApiLauncher\FastApiLauncher.csproj", "{86F8037B-B2C1-477B-987D-F0F897F6CF38}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{245563A0-C1B9-3806-EC0F-1C822C9D34F0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{245563A0-C1B9-3806-EC0F-1C822C9D34F0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{245563A0-C1B9-3806-EC0F-1C822C9D34F0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{86F8037B-B2C1-477B-987D-F0F897F6CF38}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{86F8037B-B2C1-477B-987D-F0F897F6CF38}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{86F8037B-B2C1-477B-987D-F0F897F6CF38}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{86F8037B-B2C1-477B-987D-F0F897F6CF38}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
