@@ -1,0 +1,161 @@
+﻿@page "/desglose-facturas"
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<h3>Desglose de facturas</h3>
+
+<div class="mb-3">
+    <InputFile OnChange="OnFileSelected" />
+    <button class="btn btn-primary ms-2" @onclick="Upload" disabled="@(!canSend || busy)">
+        @(busy ? "Enviando..." : "Enviar")
+    </button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(okMsg))
+{
+    <div class="alert alert-success">@okMsg</div>
+}
+@if (!string.IsNullOrWhiteSpace(errMsg))
+{
+    <div class="alert alert-danger">@errMsg</div>
+}
+
+@if (preview?.Lineas?.Count > 0)
+{
+    <div class="card">
+        <div class="card-header">Vista previa (Desglose)</div>
+        <div class="card-body p-0">
+            <table class="table table-sm mb-0">
+                <thead>
+                    <tr>
+                        <th style="width: 140px;">Cuenta</th>
+                        <th>Concepto</th>
+                        <th style="width: 160px; text-align:right;">Importe</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var l in preview!.Lineas!)
+                    {
+                        <tr>
+                            <td class="text-center">@l.Cuenta</td>
+                            <td>@l.Concepto</td>
+                            <td class="text-end">@l.Importe.ToString("N2")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+@code
+{
+    // ===== Estado UI =====
+    IBrowserFile? file;
+    bool busy;
+    bool canSend => file is not null;
+    string? okMsg;
+    string? errMsg;
+
+    // ===== Modelo de vista previa (de X-Preview) =====
+    PreviewDto? preview;
+
+    sealed class PreviewDto
+    {
+        public List<PreviewLine>? Lineas { get; set; }
+    }
+    sealed class PreviewLine
+    {
+        public string Cuenta { get; set; } = "";
+        public string Concepto { get; set; } = "";
+        public decimal Importe { get; set; }
+    }
+
+    void OnFileSelected(InputFileChangeEventArgs e)
+    {
+        file = e.File;
+        okMsg = errMsg = null;
+        preview = null;
+        StateHasChanged();
+    }
+
+    async Task Upload()
+    {
+        if (file is null) return;
+
+        okMsg = errMsg = null;
+        preview = null;
+        busy = true;
+        try
+        {
+            // 1) Leer bytes del archivo
+            using var ms = new MemoryStream();
+            await file.OpenReadStream(long.MaxValue).CopyToAsync(ms);
+            var bytes = ms.ToArray();
+
+            // 2) Preparar petición → Function: /api/DesglosarFacturas (HTTP en local)
+            var url = "http://localhost:7071/api/DesglosarFacturas";
+            using var req = new HttpRequestMessage(HttpMethod.Post, url);
+            var content = new ByteArrayContent(bytes);
+            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            req.Content = content;
+            req.Headers.TryAddWithoutValidation("X-File-Name", file.Name);
+
+            // 3) Enviar
+            using var resp = await Http.SendAsync(req);
+
+            // 4) Procesar respuesta
+            if (!resp.IsSuccessStatusCode)
+            {
+                var msg = await resp.Content.ReadAsStringAsync();
+                errMsg = $"Error {((int)resp.StatusCode)}: {msg}";
+                return;
+            }
+
+            // Vista previa desde cabecera X-Preview (si viene)
+            if (resp.Headers.TryGetValues("X-Preview", out var vals))
+            {
+                var json = vals.FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(json))
+                {
+                    preview = System.Text.Json.JsonSerializer.Deserialize<PreviewDto>(json,
+                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                }
+            }
+
+            // 5) Descargar el Excel resultante
+            var outBytes = await resp.Content.ReadAsByteArrayAsync();
+            var outName = GetFileNameFromContentDisposition(resp) ?? $"Desglose_{System.IO.Path.GetFileName(file.Name)}";
+            // Usa tu helper JS de wwwroot/download.js
+            var base64 = Convert.ToBase64String(outBytes);
+            await JS.InvokeVoidAsync("downloadFileFromBytes", outName, base64);
+
+            okMsg = "Archivo procesado correctamente.";
+        }
+        catch (Exception ex)
+        {
+            errMsg = $"Error subiendo el archivo: {ex.Message}";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    static string? GetFileNameFromContentDisposition(HttpResponseMessage resp)
+    {
+        // Soporta filename y filename* (UTF-8)
+        if (resp.Content.Headers.ContentDisposition?.FileNameStar is string star && !string.IsNullOrWhiteSpace(star))
+        {
+            try
+            {
+                // p.ej. UTF-8''Nombre%20con%20espacios.xlsx
+                var idx = star.IndexOf("''", StringComparison.Ordinal);
+                var encoded = idx >= 0 ? star[(idx + 2)..] : star;
+                return Uri.UnescapeDataString(encoded.Trim('"'));
+            }
+            catch { /* ignore */ }
+        }
+        var fn = resp.Content.Headers.ContentDisposition?.FileName;
+        return string.IsNullOrWhiteSpace(fn) ? null : fn.Trim('"');
+    }
+}

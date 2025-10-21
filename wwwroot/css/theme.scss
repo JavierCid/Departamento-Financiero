@@ -1,0 +1,113 @@
+﻿/* ============ Tema Departamento Financiero Futurista ============ */
+:root {
+    --df-bg-1: #0b1020;
+    --df-bg-2: #111936;
+    --df-accent: #5b9cff;
+    --df-accent-2: #7af0ff;
+    --df-text: #e8eefc;
+    --df-muted: #9fb1d1;
+    --glass: rgba(255,255,255,.06);
+    --border: rgba(255,255,255,.12);
+    --shadow: 0 10px 30px rgba(0,0,0,.35);
+}
+
+html, body {
+    background: radial-gradient(1200px 800px at 15% 10%, var(--df-bg-2), var(--df-bg-1));
+    color: var(--df-text);
+    font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+}
+
+/* Barra superior */
+.navbar, .top-row {
+    background: linear-gradient(90deg, rgba(91,156,255,.15), rgba(122,240,255,.10));
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--border);
+}
+
+/* Fondo general */
+.df-bg {
+    background: radial-gradient(1200px 800px at 85% -10%, rgba(122,240,255,.08), transparent), radial-gradient(900px 600px at -10% 100%, rgba(91,156,255,.12), transparent);
+}
+
+/* Tarjetas con efecto “glass” */
+.card.glass {
+    background: var(--glass);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    border-radius: 14px;
+}
+
+/* Hero de inicio */
+.df-hero {
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(91,156,255,.10), rgba(122,240,255,.06));
+}
+
+/* Texto */
+h1, h2, h3, h4, h5 {
+    color: var(--df-text);
+}
+
+.lead {
+    color: var(--df-muted);
+}
+
+/* Botones */
+.btn-primary {
+    background: linear-gradient(135deg, var(--df-accent), #3d7cff);
+    border: 0;
+}
+
+.btn-primary:hover {
+    filter: brightness(1.08);
+}
+
+.btn-outline-light {
+    border-color: var(--df-accent-2);
+    color: var(--df-text);
+}
+
+.btn-outline-light:hover {
+    background-color: rgba(91,156,255,.15);
+    color: var(--df-accent-2);
+}
+
+.btn.glow {
+    box-shadow: 0 0 20px rgba(91,156,255,.35), inset 0 0 0 1px rgba(255,255,255,.12);
+}
+
+/* Tablas (vista previa PDF) */
+.table {
+    color: var(--df-text);
+    border-color: var(--border);
+}
+
+.table-striped > tbody > tr:nth-of-type(odd) > * {
+    background-color: rgba(255,255,255,.03);
+}
+
+.table-hover > tbody > tr:hover > * {
+    background-color: rgba(91,156,255,.10);
+}
+
+.table-primary {
+    --bs-table-bg: rgba(91,156,255,.18);
+    --bs-table-color: var(--df-text);
+    --bs-table-border-color: var(--border);
+}
+
+.table th, .table td {
+    vertical-align: middle;
+    border-color: var(--border) !important;
+}
+
+/* Scrollbar sutil */
+*::-webkit-scrollbar {
+    height: 10px;
+    width: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,.12);
+    border-radius: 8px;
+}

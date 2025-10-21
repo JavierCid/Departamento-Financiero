@@ -5,18 +5,18 @@
         <div class="df-header__inner">
             <a href="/" class="df-brand">
                 <img src="Images/momentum-logo.png" alt="Momentum" class="df-logo" />
-                <span>Momentum Real Estate S.L.</span>
 
+                <span>Departamento Financiero</span>
             </a>
 
-
             <nav class="df-nav">
-                <a href="/" class="df-nav__link">Inicio</a>
-                <a href="/procesar-pdfs" class="df-nav__link">Procesar PDFs</a>
-                <a href="/uploadexcel" class="df-nav__link">Subir Excel</a>
+                <NavLink href="/" class="df-nav__link" Match="NavLinkMatch.All">Inicio</NavLink>
+                <NavLink href="/procesar-pdfs" class="df-nav__link">Procesar PDFs</NavLink>
+                <NavLink href="/upload-excel" class="df-nav__link">Subir Excel</NavLink>
             </nav>
         </div>
     </header>
+
 
     <main class="df-main">
         <div class="df-container">
@@ -24,7 +24,6 @@
         </div>
     </main>
 
-    <footer class="df-footer">
-        © @(DateTime.Now.Year) Departamento Financiero — Sistema interno de automatización
-    </footer>
+    @* (eliminar el footer duplicado) *@
+
 </div>
