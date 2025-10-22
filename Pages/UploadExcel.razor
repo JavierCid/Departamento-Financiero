@@ -1,4 +1,6 @@
 ﻿@page "/upload-excel"
+@page "/uploadexcel"
+
 @using System.Net.Http.Headers
 @using System.Text.Json
 @using System.Globalization
@@ -7,22 +9,19 @@
 @inject HttpClient Http
 @inject IJSRuntime JS
 
-<h3>Subir Excel</h3>
+<h3>Contraste Prinex</h3>
 
-<InputFile OnChange="OnFileSelected" />
+<!-- Uploader unificado (mismo look que Procesar facturas) -->
+<div class="df-uploader">
+    <div class="df-filepick">
+        <button type="button" class="btn btn-ghost df-filebtn">Seleccionar archivo (Excel)</button>
+        <InputFile OnChange="OnFileSelected" accept=".xlsx,.xls" />
+    </div>
 
-<button class="btn btn-primary"
-        disabled="@(_selectedFile is null || _isUploading)"
-        @onclick="OnUpload">
-    @if (_isUploading)
-    {
-        <span>Subiendo…</span>
-    }
-    else
-    {
-        <span>Enviar</span>
-    }
-</button>
+    <button class="btn btn-primary" @onclick="Procesar" disabled="@(!_canSend || _busy)">
+        @(_busy ? "Procesando..." : "Procesar")
+    </button>
+</div>
 
 @if (!string.IsNullOrWhiteSpace(_success))
 {
@@ -35,16 +34,18 @@
 
 @if (_preview is not null)
 {
-    <div class="card mt-4">
-        <div class="card-body">
-            <h4 class="mb-3">Resumen de comparación</h4>
+    <div class="df-preview card df-card p-3 mt-3">
+        <h5 class="mb-3">Resumen de comparación</h5>
 
-            <h5 class="mb-2">Faltantes (@(_preview.Faltantes?.Count ?? 0))</h5>
-            <table class="table table-sm table-striped">
-                <thead>
-                    <tr><th style="width:40%">Nº Factura</th><th style="width:60%">Importe PRINEX</th></tr>
-                </thead>
-                <tbody>
+        <h6 class="mb-2">Faltantes (@(_preview.Faltantes?.Count ?? 0))</h6>
+        <table class="table table-sm table-striped table-hover" style="font-size:.95rem">
+            <thead>
+                <tr>
+                    <th style="width:40%">Nº Factura</th>
+                    <th style="width:60%">Importe PRINEX</th>
+                </tr>
+            </thead>
+            <tbody>
                 @foreach (var f in _preview.Faltantes ?? new())
                 {
                     <tr>
@@ -52,20 +53,20 @@
                         <td>@ToEuro(f.Importe)</td>
                     </tr>
                 }
-                </tbody>
-            </table>
+            </tbody>
+        </table>
 
-            <h5 class="mt-4 mb-2">Descuadres (@(_preview.Descuadres?.Count ?? 0))</h5>
-            <table class="table table-sm table-striped">
-                <thead>
-                    <tr>
-                        <th style="width:25%">Nº Factura</th>
-                        <th style="width:25%">Importe PRINEX</th>
-                        <th style="width:25%">Haber MAYORES</th>
-                        <th style="width:25%">Diferencia</th>
-                    </tr>
-                </thead>
-                <tbody>
+        <h6 class="mt-3 mb-2">Descuadres (@(_preview.Descuadres?.Count ?? 0))</h6>
+        <table class="table table-sm table-striped table-hover" style="font-size:.95rem">
+            <thead>
+                <tr>
+                    <th style="width:25%">Nº Factura</th>
+                    <th style="width:25%">Importe PRINEX</th>
+                    <th style="width:25%">Haber MAYORES</th>
+                    <th style="width:25%">Diferencia</th>
+                </tr>
+            </thead>
+            <tbody>
                 @foreach (var d in _preview.Descuadres ?? new())
                 {
                     <tr>
@@ -75,35 +76,37 @@
                         <td class="neg">@ToEuro(d.Diferencia)</td>
                     </tr>
                 }
-                </tbody>
-            </table>
-        </div>
+            </tbody>
+        </table>
+
+        <div class="text-muted small">Mostrando @((_preview.Faltantes?.Count ?? 0) + (_preview.Descuadres?.Count ?? 0)) elementos.</div>
     </div>
 }
 
-@code
-{
+@code {
+    // ---- Estado ----
     IBrowserFile? _selectedFile;
-    bool _isUploading;
+    bool _busy;
+    bool _canSend => _selectedFile is not null;
+
     string? _success;
     string? _error;
     PreviewDto? _preview;
 
-    private void OnFileSelected(InputFileChangeEventArgs e)
+    // ---- Selección ----
+    void OnFileSelected(InputFileChangeEventArgs e)
     {
         _selectedFile = e.File;
-        _success = null;
-        _error = null;
+        _success = _error = null;
         _preview = null;
     }
 
-    private async Task OnUpload()
+    // ---- Envío ----
+    async Task Procesar()
     {
         if (_selectedFile is null) return;
 
-        _isUploading = true;
-        _success = null;
-        _error = null;
+        _busy = true; _success = _error = null; _preview = null;
 
         try
         {
@@ -115,38 +118,35 @@
             content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
             content.Headers.Add("X-File-Name", _selectedFile.Name);
 
-            // LOCAL: backend en Functions
+            // Backend (Functions local)
             const string apiUrl = "http://localhost:7127/api/ProcesarExcel";
 
             var resp = await Http.PostAsync(apiUrl, content);
 
-            if (resp.IsSuccessStatusCode)
-            {
-                var outBytes = await resp.Content.ReadAsByteArrayAsync();
-                var outName = GetFileNameFromContentDisposition(resp) ?? "Comparacion.xlsx";
-                var b64 = Convert.ToBase64String(outBytes);
-
-                await JS.InvokeVoidAsync("downloadFileFromBytes", outName, b64);
-                _success = "Archivo procesado correctamente.";
-
-                // Vista previa desde cabecera X-Preview (si viene)
-                if (resp.Headers.TryGetValues("X-Preview", out var values))
-                {
-                    var json = values.FirstOrDefault();
-                    if (!string.IsNullOrWhiteSpace(json))
-                    {
-                        _preview = JsonSerializer.Deserialize<PreviewDto>(
-                            json,
-                            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                        );
-                    }
-                }
-            }
-            else
+            if (!resp.IsSuccessStatusCode)
             {
                 _error = await resp.Content.ReadAsStringAsync();
-                if (string.IsNullOrWhiteSpace(_error))
-                    _error = "Error al procesar el archivo.";
+                if (string.IsNullOrWhiteSpace(_error)) _error = "Error al procesar el archivo.";
+                return;
+            }
+
+            var outBytes = await resp.Content.ReadAsByteArrayAsync();
+            var outName = GetFileNameFromContentDisposition(resp) ?? "Comparacion.xlsx";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", outName, Convert.ToBase64String(outBytes));
+
+            _success = "Archivo procesado correctamente.";
+
+            // Vista previa opcional vía cabecera X-Preview
+            if (resp.Headers.TryGetValues("X-Preview", out var values))
+            {
+                var json = values.FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(json))
+                {
+                    _preview = JsonSerializer.Deserialize<PreviewDto>(
+                        json,
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                    );
+                }
             }
         }
         catch
@@ -155,24 +155,22 @@
         }
         finally
         {
-            _isUploading = false;
+            _busy = false;
         }
     }
 
-    // ==== helpers ====
-    private static string ToEuro(double v) =>
-        v.ToString("C", new CultureInfo("es-ES"));
+    // ---- Helpers ----
+    static string ToEuro(double v) => v.ToString("C", new CultureInfo("es-ES"));
 
-    private static string? GetFileNameFromContentDisposition(HttpResponseMessage resp)
+    static string? GetFileNameFromContentDisposition(HttpResponseMessage resp)
     {
         if (!resp.Content.Headers.TryGetValues("Content-Disposition", out var vals)) return null;
         var cd = vals.FirstOrDefault() ?? "";
-        // filename* (RFC 5987) primero
+
         var starIdx = cd.IndexOf("filename*=", StringComparison.OrdinalIgnoreCase);
         if (starIdx >= 0)
         {
             var part = cd.Substring(starIdx + 10).Trim().Trim(';').Trim();
-            // filename*=UTF-8''<urlencoded>
             var pos = part.IndexOf("''", StringComparison.Ordinal);
             if (pos > 0)
             {
@@ -180,7 +178,7 @@
                 return Uri.UnescapeDataString(enc);
             }
         }
-        // fallback filename="..."
+
         var fnIdx = cd.IndexOf("filename=", StringComparison.OrdinalIgnoreCase);
         if (fnIdx >= 0)
         {
@@ -190,7 +188,7 @@
         return null;
     }
 
-    // ==== DTOs para la vista previa ====
+    // ---- DTOs ----
     private class PreviewDto
     {
         public List<Faltante>? Faltantes { get; set; }
@@ -213,5 +211,8 @@
 }
 
 <style>
-    .neg { color: #b00000; font-weight: 600; }
+    .neg {
+        color: #b00000;
+        font-weight: 600;
+    }
 </style>

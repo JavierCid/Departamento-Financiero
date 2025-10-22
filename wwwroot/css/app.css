@@ -9,7 +9,9 @@
     --df-header: #1B202C; /* barra navbar (logo)*/
     --df-surface: #101828; /* tarjetas oscuras   */
     --df-primary: #4e8fff; /* azul botón         */
-    --df-primary-2: #65e1ff; /* azul degradado     */
+    --df-primary-2: #2e6dee;
+
+
     --df-text: #e8ecff; /* texto principal    */
     --df-muted: #a9b3d4; /* texto secundario   */
     --df-border: rgba(255,255,255,.10);
@@ -72,19 +74,36 @@ body {
 
 /* Logo 20% más grande y SIEMPRE proporcional */
 .df-logo {
-    height: 40px; /* -20% respecto a 84px */
-    width: auto; /* mantiene proporción, nunca se deforma */
+    height: 46px; /* +15% */
+
+    width: auto;
     object-fit: contain;
     display: block;
-    margin-top: -12px; /* sobresale para que la barra sea más baja */
-    margin-bottom: -12px; /* idem */
+    margin-top: -12px;
+    margin-bottom: -12px;
+    /* Mejora visual y nitidez */
+    filter: contrast(1.15) saturate(1.05) brightness(1.05);
 }
+
+/* Texto de marca, con un poco más de espacio respecto al logo */
+.df-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 22px; /* +4 espacios aprox */
+    text-decoration: none;
+    color: #e8efff;
+    font-weight: 700;
+    letter-spacing: .3px;
+    line-height: 1;
+}
+
 
 /* Texto de marca, sin “estirar” la fila */
 .df-brand {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 22px; /* +~4 espacios de separación */
+
     text-decoration: none;
     color: #e8efff;
     font-weight: 700;
@@ -122,11 +141,30 @@ body {
 
 /* ====== Hero ====== */
 .df-hero {
+    position: relative; /* necesario para el ::after */
     background: radial-gradient(1200px 300px at 20% 0%, rgba(255,255,255,.10) 0%, rgba(255,255,255,0) 60%), linear-gradient(180deg, rgba(255,255,255,.06) 0%, rgba(255,255,255,.03) 100%), linear-gradient(90deg, var(--df-bg) 0%, var(--df-bg2) 100%);
     border: 1px solid var(--df-border);
     border-radius: 16px;
     box-shadow: var(--df-shadow);
 }
+
+    /* logo tenue arriba a la derecha dentro del hero */
+    .df-hero::after {
+        content: "";
+        position: absolute;
+        top: 18px;
+        right: 24px;
+        width: 72px;
+        height: 72px;
+        background-image: url("Images/momentum-logo.png");
+        background-repeat: no-repeat;
+        background-position: center;
+        background-size: contain;
+        opacity: .25; /* elegante, no molesta */
+        filter: contrast(115%) saturate(110%);
+        pointer-events: none;
+    }
+
 
 .df-hero__content {
     padding: 38px 28px
@@ -136,11 +174,18 @@ body {
     margin: 0 0 12px;
     font-size: 44px;
     line-height: 1.1;
-    background: linear-gradient(90deg,#dfe7ff 0%,#c9d6ff 60%,#9fc5ff 100%);
+    /* Degradado elegante y compatible */
+    background: linear-gradient(90deg, #dfe7ff 0%, #c9d6ff 60%, #9fc5ff 100%);
+    /* HACK: evita los avisos de VS sin perder el efecto */
+    /* stylelint-disable-next-line */
     -webkit-background-clip: text;
+    /* stylelint-disable-next-line */
+    background-clip: text;
     -webkit-text-fill-color: transparent;
-    color: #dfe7ff;
+    color: #dfe7ff; /* fallback */
 }
+
+
 
 .df-hero p {
     margin: 0;
@@ -392,115 +437,265 @@ body {
         overflow: hidden;
         text-overflow: ellipsis
     }
-/* ====== Vista previa (mejor contraste) ====== */
+/* ====== Vista previa (tono oscuro elegante) ====== */
 .df-preview {
-    background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
-    border: 1px solid rgba(255,255,255,.18);
-    border-radius: 14px;
-    box-shadow: 0 12px 28px rgba(0,0,0,.35);
-    padding: 16px;
-    backdrop-filter: blur(4px);
-}
-
-    /* Cabecera de tabla más clara y “pegajosa” */
-    .df-preview table thead th {
-        position: sticky;
-        top: 0;
-        z-index: 1;
-        background: rgba(255,255,255,.12);
-        color: #eaf1ff;
-        border-bottom: 1px solid rgba(255,255,255,.18);
-    }
-
-    /* Filas: ligera separación y hover */
-    .df-preview table tbody tr {
-        border-top: 1px solid rgba(255,255,255,.10);
-    }
-
-        .df-preview table tbody tr:hover {
-            background: rgba(255,255,255,.05);
-        }
-
-    /* Números alineados y un poco más vivos */
-    .df-preview .text-end {
-        color: #e6eeff;
-        font-variant-numeric: tabular-nums;
-    }
-/* ---- Vista previa (tarjeta clara, borde y sombra) ---- */
-.df-preview {
-    background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
-    border: 1px solid rgba(255,255,255,.14);
+    background: #131b2f; /* panel oscuro elegante */
+    border: 1px solid rgba(255,255,255,.08);
     border-radius: 16px;
     box-shadow: 0 10px 28px rgba(0,0,0,.28);
-    backdrop-filter: blur(3px);
+    padding: 16px;
 }
 
-    /* Tabla legible sobre fondo oscuro */
-    .df-preview .table {
-        color: #e9efff;
+    /* Título legible sobre pill */
+    .df-preview h5 {
+        color: #eaf1ff;
+        background: rgba(255,255,255,.10);
+        border: 1px solid rgba(255,255,255,.14);
+        padding: 6px 10px;
+        border-radius: 10px;
+        display: inline-block;
+        letter-spacing: .2px;
         margin-bottom: 12px;
     }
 
+    /* Tabla oscura con mejor contraste y texto compacto */
+    .df-preview .table {
+        color: #e9efff;
+        background: transparent;
+        margin-bottom: 12px;
+        border-radius: 10px;
+        overflow: hidden;
+        border-color: rgba(255,255,255,.12);
+        font-size: 14px !important; /* ↓ reducido 4 unidades */
+        line-height: 1.25;
+    }
+
+        /* Cabecera sólida */
         .df-preview .table thead th {
-            background: #1a2847; /* azul más claro */
-            color: #dbe9ff;
-            border-color: rgba(255,255,255,.14);
+            background: #1f3564;
+            color: #ffffff;
+            border-color: rgba(255,255,255,.16);
+            text-align: left;
+            padding: 8px 12px; /* un poco más compacto */
+            font-size: 14px !important;
+            line-height: 1.25;
         }
 
-        .df-preview .table td,
-        .df-preview .table th {
-            border-color: rgba(255,255,255,.10);
+        /* Celdas con padding ajustado */
+        .df-preview .table td {
+            padding: 8px 12px;
+            font-size: 14px !important;
         }
 
+            /* Respiro en bordes laterales */
+            .df-preview .table thead th:first-child,
+            .df-preview .table td:first-child {
+                padding-left: 16px;
+            }
+
+            .df-preview .table thead th:last-child,
+            .df-preview .table td:last-child {
+                padding-right: 16px;
+            }
+
+    /* Alternancia marcada */
     .df-preview .table-striped > tbody > tr:nth-of-type(odd) > * {
-        background-color: rgba(255,255,255,.03);
+        background-color: rgba(255,255,255,.06);
+        color: #e9efff; /* mismo color que IVA/IRPF */
     }
 
+
+    .df-preview .table-striped > tbody > tr:nth-of-type(even) > * {
+        background-color: rgba(0,0,0,.12);
+    }
+
+    /* Hover sutil corporativo */
     .df-preview .table-hover tbody tr:hover > * {
-        background-color: rgba(100,150,255,.10);
+        background-color: rgba(78,143,255,.14);
     }
 
-    .df-preview .text-muted {
-        color: #a8b7de !important;
+    /* Bordes definidos */
+    .df-preview .table td,
+    .df-preview .table th {
+        border-color: rgba(255,255,255,.18);
     }
-.df-uploader {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    margin: 10px 0 14px;
-}
 
-.df-filepick {
+    /* Alinear importes a la izquierda (incluye IVA €) */
+    .df-preview .text-end {
+        text-align: left !important;
+        color: #e9efff;
+        font-variant-numeric: tabular-nums;
+    }
+    /* Enlaces dentro de filas impares: mismo color que el texto */
+    .df-preview .table-striped > tbody > tr:nth-of-type(odd) a {
+        color: #e9efff !important;
+    }
+
+    /* En general, que los enlaces hereden el color de la celda */
+    .df-preview .table a {
+        color: inherit;
+        text-decoration: underline;
+    }
+    /* Encabezado de sección “Vista previa / Resumen de comparación” en UploadExcel */
+    .upload-summary h5,
+    .upload-summary .section-title,
+    .df-preview h5 {
+        color: #eaf1ff;
+        background: rgba(255,255,255,.10);
+        border: 1px solid rgba(255,255,255,.14);
+        padding: 6px 10px;
+        border-radius: 10px;
+        display: inline-block;
+        letter-spacing: .2px;
+        margin-bottom: 12px;
+    }
+/* === Marca/ícono en el hero (arriba-derecha) === */
+.df-hero {
     position: relative;
-    display: inline-block;
+}
+/* asegura contexto para posicionar dentro */
+
+.df-hero__mark {
+    position: absolute;
+    top: 6%; /* sube bastante más */
+    right: 90px; /* eje X perfecto */
+    width: 200px; /* un pelín más grande */
+    height: 200px;
+    background-image: url("/Images/icono-departamento-financiero.png");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    opacity: 0.75; /* más visible */
+    filter: contrast(1.4) brightness(1,1) saturate(1.1);
+    pointer-events: none;
+    z-index: 2;
 }
 
-    .df-filepick input[type=file] {
+
+
+
+
+/* ==== Alineación columnas Contraste Prinex ==== */
+table.table thead th {
+    text-align: left !important;
+    padding-left: 18px; /* ajusta la cabecera un poco a la derecha */
+}
+
+table.table tbody td {
+    padding-left: 18px; /* iguala el contenido con la cabecera */
+}
+/* ==== Logo decorativo en la sección principal (hero) ==== */
+.df-hero {
+    position: relative;
+    overflow: hidden;
+}
+
+    .df-hero::after {
+        content: "";
         position: absolute;
-        inset: 0;
-        opacity: 0;
-        cursor: pointer;
+        bottom: 24px;
+        right: 32px;
+        width: 90px; /* 15% más grande */
+        height: 90px;
+        background-image: url("Images/momentum-logo.png");
+        background-repeat: no-repeat;
+        background-position: center;
+        background-size: contain;
+        opacity: 0.25; /* mejor visibilidad pero aún elegante */
+        filter: contrast(1.25) brightness(1.08);
+        pointer-events: none;
+        z-index: 2;
     }
-
-.df-filebtn {
-    min-width: 240px;
+/* === 1) Página un poco más ancha (afecta a todo el contenido) === */
+/* tamaño “estrecho” elegante */
+.df-container {
+    max-width: 1180px; /* 1100–1200 queda muy bien */
+    width: min(1180px, 94vw); /* respeta el viewport en pantallas pequeñas */
+    margin: 0 auto; /* centrado */
+    padding: 0 16px; /* un poco de aire a los lados */
 }
 
-.df-drop {
-    position: relative;
-    border: 1px dashed rgba(255,255,255,.22);
+
+/* =======================
+   VISTA PREVIA (centrada, sin desbordes)
+   ======================= */
+.df-preview {
+    max-width: 1250px; /* más ancho, pero controlado */
+    width: 100%;
+    margin: 0 auto; /* centrado */
+    padding: 16px 22px; /* acolchado del recuadro */
+    background: rgba(255,255,255,.04);
     border-radius: 14px;
-    background: rgba(0,0,0,.15);
-    padding: 28px;
-    text-align: center;
-    color: #b9c3e6;
-    margin: 8px 0 12px;
-    transition: .15s ease;
+    box-sizing: border-box;
+    overflow-x: auto; /* fallback si algún dato se resiste */
 }
 
-    .df-drop.drag {
-        border-color: var(--df-primary);
-        box-shadow: 0 0 0 2px rgba(78,143,255,.35) inset,0 6px 22px rgba(78,143,255,.25);
-        background: rgba(78,143,255,.08);
-        color: #e8efff;
+    /* Tabla dentro de la vista previa */
+    .df-preview .table {
+        width: 100%;
+        table-layout: auto;
+        border-collapse: collapse;
+        font-size: 0.90rem; /* un pelín menor para que quepa todo */
     }
+
+        /* Celdas: una sola línea + “...” */
+        .df-preview .table th,
+        .df-preview .table td {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.25;
+            padding: 10px 12px;
+        }
+
+        /* ---- Anchos por columna (ajústalos si quieres) ---- */
+        /* 1) Archivo */
+        .df-preview .table thead th:nth-child(1),
+        .df-preview .table tbody td:nth-child(1) {
+            max-width: 200px;
+        }
+
+        /* 2) Proveedor */
+        .df-preview .table thead th:nth-child(2),
+        .df-preview .table tbody td:nth-child(2) {
+            max-width: 180px;
+        }
+
+        /* 3) Fecha */
+        .df-preview .table thead th:nth-child(3),
+        .df-preview .table tbody td:nth-child(3) {
+            max-width: 100px;
+        }
+
+        /* 4) Invoice */
+        .df-preview .table thead th:nth-child(4),
+        .df-preview .table tbody td:nth-child(4) {
+            max-width: 120px;
+        }
+
+        /* 5) Concepto (backend ya limita a 20/30 chars; aquí damos aire) */
+        .df-preview .table thead th:nth-child(5),
+        .df-preview .table tbody td:nth-child(5) {
+            max-width: 420px;
+        }
+
+        /* 6–9) Importes compactos */
+        .df-preview .table thead th:nth-child(6),
+        .df-preview .table tbody td:nth-child(6),
+        .df-preview .table thead th:nth-child(7),
+        .df-preview .table tbody td:nth-child(7),
+        .df-preview .table thead th:nth-child(8),
+        .df-preview .table tbody td:nth-child(8),
+        .df-preview .table thead th:nth-child(9),
+        .df-preview .table tbody td:nth-child(9) {
+            max-width: 110px;
+        }
+
+        /* Enlaces con ellipsis también */
+        .df-preview .table td a {
+            display: inline-block;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }

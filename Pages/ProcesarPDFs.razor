@@ -19,7 +19,9 @@
 <!-- Dropzone que usa un InputFile invisible para capturar drop y click -->
 <div class="df-drop">
     <div class="df-drop__label">
-        <strong>Arrastra aquí tus PDF</strong>
+        <strong>
+            Arrastra aquí tus facturas
+        </strong>
         <div class="text-muted small">…o usa “Seleccionar archivos (PDF)”.</div>
     </div>
     <InputFile class="df-drop__input" OnChange="OnFilesSelected" multiple accept=".pdf" />
@@ -158,7 +160,8 @@ else if (!string.IsNullOrWhiteSpace(_previewJson))
             var fileName = ExtraerNombreDescarga(resp) ?? "resultado.xlsx";
             await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, Convert.ToBase64String(bytesOut));
 
-            _ok = "OK";
+            _ok = "Procesamiento exitoso";
+
             _files.Clear();
         }
         catch (Exception ex)
