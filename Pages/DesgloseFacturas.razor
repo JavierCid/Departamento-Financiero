@@ -93,7 +93,7 @@
             var bytes = ms.ToArray();
 
             // 2) Preparar petición → Function: /api/DesglosarFacturas (HTTP en local)
-            var url = "http://localhost:7071/api/DesglosarFacturas";
+            var url = "http://localhost:7127/api/DesglosarFacturas";
             using var req = new HttpRequestMessage(HttpMethod.Post, url);
             var content = new ByteArrayContent(bytes);
             content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
