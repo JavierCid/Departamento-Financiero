@@ -1,0 +1,242 @@
+﻿@page "/bankflowpro"
+@using System.Net.Http.Headers
+@using System.Text.Json
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+
+<div class="df-container">
+    <section class="df-section bankflow">
+
+        <h2>BankFlow Pro</h2>
+        <p>Procesa extractos bancarios y desglosa remesas automáticamente.</p>
+
+        <div class="df-upload">
+            <label>Extracto bancario (.xlsx o .csv)</label>
+
+            <InputFile OnChange="OnExtractoSelected" id="extracto-input" style="display: none;" />
+
+            <label for="extracto-input" class="btn-file">
+                <i class="bi bi-file-earmark-spreadsheet"></i> Seleccionar extracto
+            </label>
+        </div>
+
+        <div class="df-upload">
+            <label>(Opcional) Detalle de remesas (.xlsx o .csv)</label>
+
+            <InputFile OnChange="OnRemesaSelected" id="remesa-input" style="display: none;" />
+
+            <label for="remesa-input" class="btn-file">
+                <i class="bi bi-files"></i> Seleccionar remesa
+            </label>
+        </div>
+
+        <div class="bf-actions">
+            <button class="btn-primary" @onclick="ProcesarArchivos" disabled="@(IsProcessing || Extracto is null)">
+                @(IsProcessing ? "Procesando..." : "Procesar")
+            </button>
+        </div>
+
+
+        @if (ProcessOk)
+        {
+            <div class="alert-success alert-pill">
+                <i class="bi bi-check-circle-fill"></i>
+                <span>Procesamiento exitoso</span>
+            </div>
+        }
+
+
+
+        @if (Preview != null)
+        {
+            <h4>Vista previa de resultados</h4>
+
+            <div class="df-preview">
+                <table class="table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Concepto</th>
+                            <th>Tipo</th>
+                            <th>Importe</th>
+                            <th>Comisión</th>
+                            <th>IVA</th>
+                            <th>IRPF</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in Preview)
+                        {
+                            <tr>
+                                <td>@row.Fecha</td>
+                                <td>@row.Concepto</td>
+                                <td>@row.Tipo</td>
+                                <td>@row.Importe</td>
+                                <td>@row.Comision</td>
+                                <td>@row.IVA</td>
+                                <td>@row.IRPF</td>
+                                <td>@row.Total</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+    </section>
+</div>
+
+@code {
+    IBrowserFile? Extracto = null;
+
+    IBrowserFile? Remesa;
+    bool IsProcessing = false;
+    bool ProcessOk = false;
+
+
+    class PreviewRow
+    {
+        public string Fecha { get; set; } = "";
+        public string Concepto { get; set; } = "";
+        public string Tipo { get; set; } = "";
+        public string Importe { get; set; } = "";
+        public string Comision { get; set; } = "";
+        public string IVA { get; set; } = "";
+        public string IRPF { get; set; } = "";
+        public string Total { get; set; } = ""; // Volvemos a Total
+    }
+
+
+    List<PreviewRow>? Preview;
+
+    void OnExtractoSelected(InputFileChangeEventArgs e)
+        => Extracto = e.File;
+
+    void OnRemesaSelected(InputFileChangeEventArgs e)
+        => Remesa = e.File;
+
+    async Task ProcesarArchivos()
+    {
+        if (Extracto is null) return;
+
+        IsProcessing = true;
+        ProcessOk = false;
+        Preview = null;
+        StateHasChanged();
+
+
+        using var form = new MultipartFormDataContent();
+
+        // Extracto (obligatorio)
+        var extMs = new MemoryStream();
+        await (Extracto.OpenReadStream(long.MaxValue)).CopyToAsync(extMs);
+        var extContent = new ByteArrayContent(extMs.ToArray());
+        extContent.Headers.ContentType = new MediaTypeHeaderValue(Extracto.ContentType ?? "application/octet-stream");
+        form.Add(extContent, "extracto", Extracto.Name);
+
+
+        // Detalle Remesas (opcional)
+        if (Remesa is not null)
+        {
+            var remMs = new MemoryStream();
+            await (Remesa.OpenReadStream(long.MaxValue)).CopyToAsync(remMs);
+            var remContent = new ByteArrayContent(remMs.ToArray());
+            remContent.Headers.ContentType = new MediaTypeHeaderValue(Remesa.ContentType ?? "application/octet-stream");
+            form.Add(remContent, "detalle_remesas", Remesa.Name);
+        }
+
+
+        HttpResponseMessage resp = null!;
+        byte[] excelBytes = Array.Empty<byte>();
+        string fileName = "Movimientos_desglosados.xlsx";
+
+        try
+        {
+            resp = await Http.PostAsync("http://localhost:8000/api/bankflowpro", form);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var msg = await resp.Content.ReadAsStringAsync();
+                await JS.InvokeVoidAsync("alert", $"Error BankFlow Pro: {(int)resp.StatusCode} - {msg}");
+                IsProcessing = false;
+                ProcessOk = false;
+                StateHasChanged();
+                return;
+
+            }
+
+
+            // Nombre de archivo (Content-Disposition)
+            var cd = resp.Content.Headers.ContentDisposition;
+            if (cd?.FileNameStar is not null) fileName = cd.FileNameStar.Trim('"');
+            else if (cd?.FileName is not null) fileName = cd.FileName.Trim('"');
+
+            excelBytes = await resp.Content.ReadAsByteArrayAsync();
+            ProcessOk = true;
+
+            // Parsear cabecera X-Preview
+            if (resp.Headers.TryGetValues("X-Preview", out var prevVals))
+            {
+                var previewJson = prevVals.FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(previewJson))
+                {
+                    var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+                    // Intento formato envuelto: { Muestra: [...], Filas: N }
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(previewJson);
+                        if (doc.RootElement.TryGetProperty("Muestra", out var muestra) && muestra.ValueKind == JsonValueKind.Array)
+                        {
+                            var list = new List<PreviewRow>();
+                            foreach (var el in muestra.EnumerateArray())
+                            {
+                                list.Add(new PreviewRow
+                                {
+                                    Fecha = el.TryGetProperty("Fecha", out var f) ? f.GetString() ?? "" : "",
+                                    Concepto = el.TryGetProperty("Concepto", out var c) ? c.GetString() ?? "" : "",
+                                    Tipo = el.TryGetProperty("Tipo", out var t) ? t.GetString() ?? "" : "",
+                                    Importe = el.TryGetProperty("Importe", out var i) ? i.GetString() ?? "" : "",
+                                    Comision = el.TryGetProperty("Comisión", out var cm)
+                                        ? (cm.GetString() ?? "")
+                                        : (el.TryGetProperty("Comision", out var cm2) ? (cm2.GetString() ?? "") : ""),
+                                    IVA = el.TryGetProperty("IVA", out var v) ? v.GetString() ?? "" : "",
+                                    IRPF = el.TryGetProperty("IRPF", out var r) ? r.GetString() ?? "" : "",
+                                    Total = el.TryGetProperty("Total", out var tt) ? tt.GetString() ?? "" : "" // Volvemos a Total
+                                });
+                            }
+                            if (list.Count > 0) Preview = list;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error parseando X-Preview: {ex.Message}");
+                        // Fallback por si el JSON es una lista directa (aunque main.py no lo haga)
+                        try
+                        {
+                            var direct = JsonSerializer.Deserialize<List<PreviewRow>>(previewJson, opts);
+                            if (direct is not null && direct.Count > 0)
+                                Preview = direct;
+                        }
+                        catch { }
+                    }
+                }
+            }
+
+            // Descargar Excel
+            var base64 = Convert.ToBase64String(excelBytes);
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, base64);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error procesando BankFlow Pro: {ex.Message}");
+        }
+        finally
+        {
+            IsProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+}

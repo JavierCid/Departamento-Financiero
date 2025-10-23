@@ -699,3 +699,71 @@ table.table tbody td {
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+/* === BankFlow Pro: espaciados finos === */
+.bankflow .df-upload { /* separa inputs entre sí y del botón */
+    margin-bottom: 10px;
+}
+
+.bankflow .bf-actions { /* espacio arriba del botón y abajo hacia el banner */
+    margin-top: 12px; /* separa del "(Opcional) ..." */
+    margin-bottom: 14px; /* separa del "Procesamiento exitoso" */
+}
+
+.bankflow .alert-success { /* más aire alrededor del banner */
+    margin-top: 6px;
+    margin-bottom: 16px;
+}
+
+.bankflow h4 { /* separa "Vista previa de resultados" del banner */
+    margin-top: 8px;
+}
+/* === Banner BankFlow Pro === */
+.alert-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px; /* ← aire interior */
+    border-radius: 12px; /* ← menos cuadrado */
+}
+
+    .alert-pill .bi {
+        font-size: 1rem;
+    }
+
+/* ===================================
+   Estilo para botones de subida (label)
+   =================================== */
+
+.btn-file {
+    /* Apariencia de botón */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem; /* Espacio si usas icono */
+    cursor: pointer;
+    width: 100%; /* Ocupa el ancho de la caja */
+    /* Estilo "oscuro y sobrio" (usa los colores de tus tarjetas) */
+    background: var(--df-surface);
+    color: var(--df-muted);
+    border: 1px solid var(--df-border);
+    /* Estilo "más pequeño" */
+    padding: 8px 16px; /* Más pequeño que los 10px 18px del btn-primary */
+    font-size: 0.95rem;
+    font-weight: 500;
+    /* Transición y bordes */
+    border-radius: 10px; /* Un poco menos redondeado que btn-primary */
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+    .btn-file:hover {
+        /* Un poco más claro al pasar el ratón (usa el color de tu header) */
+        background: var(--df-header);
+        color: var(--df-text);
+        border-color: rgba(255,255,255,.18);
+    }
+
+/* Oculta el texto "Ningún archivo seleccionado" que sobraba */
+/* y el input original, que está reemplazado por la <label> */
+.bankflow input[type="file"] {
+    display: none;
+}
