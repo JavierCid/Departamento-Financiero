@@ -2,7 +2,7 @@
 
 ## Local
 - Frontend (Blazor WASM): http://localhost:7252
-- Functions .NET 8 (isolated): http://localhost:7071
+- Functions .NET 8 (isolated): http://localhost:7130
 - Endpoint: POST /api/ProcesarExcel
 
 ## Notas
