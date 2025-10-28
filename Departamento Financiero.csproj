@@ -1,19 +1,30 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+	  <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+
+	  <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+	  <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+	  <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
   </PropertyGroup>
 
-  <ItemGroup>
-    <Compile Remove="FunctionApp1\**" />
-    <Content Remove="FunctionApp1\**" />
-    <EmbeddedResource Remove="FunctionApp1\**" />
-    <None Remove="FunctionApp1\**" />
-  </ItemGroup>
 
-  <ItemGroup>
+	<ItemGroup>
+		<Compile Remove="FunctionApp1\**" />
+		<Content Remove="FunctionApp1\**" />
+		<EmbeddedResource Remove="FunctionApp1\**" />
+		<None Remove="FunctionApp1\**" />
+
+		<Compile Remove="FastApiLauncher\**" />
+		<Content Remove="FastApiLauncher\**" />
+		<EmbeddedResource Remove="FastApiLauncher\**" />
+		<None Remove="FastApiLauncher\**" />
+	</ItemGroup>
+
+
+	<ItemGroup>
     <Content Remove="Pages\Weather.razor" />
     <Content Remove="wwwroot\Images\prinex-logo.png" />
   </ItemGroup>
@@ -23,4 +34,8 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="8.0.20" PrivateAssets="all" />
   </ItemGroup>
 
+	<ItemGroup>
+		<Compile Remove="obj\**\*.cs" />
+		<Compile Remove="bin\**\*.cs" />
+	</ItemGroup>
 </Project>

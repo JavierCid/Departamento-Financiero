@@ -580,7 +580,7 @@ body {
     right: 90px; /* eje X perfecto */
     width: 200px; /* un pelín más grande */
     height: 200px;
-    background-image: url("/Images/icono-departamento-financiero.png");
+    background-image: url("/Images/icono-departamento-financier.png");
     background-repeat: no-repeat;
     background-position: center;
     background-size: contain;
@@ -845,7 +845,6 @@ table.table tbody td {
     color: #a5b4fc;
     font-size: rem;
     margin-top: -0.4rem;
-    margin-bottom: 1rem;
 }
 
 /* ===== Logo BankFlow Pro ===== */

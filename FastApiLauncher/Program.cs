@@ -1,19 +1,32 @@
 ﻿using System.Diagnostics;
+using System.Net.Sockets;
+
+bool PuertoLibre(int port)
+{
+    try { using var c = new TcpClient("127.0.0.1", port); return false; }
+    catch { return true; }
+}
 
 try
 {
-    var psi = new ProcessStartInfo
+    if (PuertoLibre(8000))
     {
-        FileName = "cmd.exe",
-        Arguments = "/C start \"\" \"C:\\Users\\Javier Cid\\source\\repos\\Departamento Financiero\\run_fastapi.bat\"",
-        UseShellExecute = true,   // lanza en nueva ventana
-        CreateNoWindow = false
-    };
-    Process.Start(psi);
+        var psi = new ProcessStartInfo
+        {
+            FileName = @"C:\Users\Javier Cid\AppData\Local\Programs\Python\Python311\python.exe",
+            Arguments = "-m uvicorn main:app --host 127.0.0.1 --port 8000 --reload",
+            WorkingDirectory = @"C:\Users\Javier Cid\source\repos\Departamento Financiero\pdf-service",
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        Process.Start(psi);
+    }
+    else
+    {
+        Console.WriteLine("FastAPI ya está en 127.0.0.1:8000. No se lanza de nuevo.");
+    }
 }
 catch (Exception ex)
 {
     Console.Error.WriteLine("No se pudo lanzar FastAPI: " + ex.Message);
 }
-
-// No bloqueamos; dejamos que VS siga con el resto de proyectos
