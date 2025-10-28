@@ -12,14 +12,14 @@ from datetime import datetime
 from bankflow_rules import process_bankflow  # ← Usamos el pipeline completo
 
 # =========================
-# App + CORS
+# App + CORS (versión estable local)
 # =========================
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# <<< AÑADE ESTO PARA BLÁZOR LOCAL >>>
+# 🔧 Aceptar cualquier origen en local (localhost / 127.0.0.1)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -31,31 +31,15 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-)
-# <<< FIN CORS >>>
-
-
-ALLOWED_ORIGINS = [
-    "http://localhost:7252",
-    "http://127.0.0.1:7252",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=False,
-    allow_methods=["POST", "OPTIONS"],
-    allow_headers=["*"],
     expose_headers=["Content-Disposition", "X-Preview"],
 )
 
 
 @app.options("/{full_path:path}")
-def cors_preflight(full_path: str):
+async def cors_preflight(full_path: str):
     return Response(status_code=204)
 
-# =========================
-# Helpers comunes
+
 # =========================
 
 
@@ -470,7 +454,8 @@ async def bankflowpro(
             "Comisión": 0.0,
             "IVA": 0.0,
             "IRPF": 0.0,
-            "Total": imp, # <-- Columna final es Total
+            "Importe Neto": imp, # <-- Nueva columna final es Importe Neto
+
         })
 
     # --- Leer detalle remesas (si existe) ---
@@ -484,30 +469,55 @@ async def bankflowpro(
             avisos.append(f"Aviso: No se pudo leer el detalle de remesas: {e}")
 
     # --- DataFrame con "Total" ---
-    out_df = pd.DataFrame(out_rows, columns=["Fecha", "Concepto", "Tipo", "Importe", "Comisión", "IVA", "IRPF", "Total"])
+    out_df = pd.DataFrame(out_rows, columns=["Fecha", "Concepto", "Tipo", "Importe", "Comisión", "IVA", "IRPF", "Importe Neto"])
+
 
     # 3.1) Aplicar pipeline completo (Reglas + Remesas)
     out_df, avisos_bankflow = process_bankflow(out_df, rem_df)
     avisos.extend(avisos_bankflow)
 
-
-    # 4) X-Preview (máx. 50 filas)
+        # 4) X-Preview (máx. 50 filas)
     preview_rows = []
+
     for _, r in out_df.head(50).iterrows():
-        concepto_preview = str(r["Concepto"])
+        concepto_preview = str(r.get("Concepto", "") or "")
         if len(concepto_preview) > 30:
             concepto_preview = concepto_preview[:30] + "…"
 
+        tipo_str = str(r.get("Tipo", "") or "")
+
+        # parseo robusto (EU) para números en preview
+        def _to_num(v):
+            if isinstance(v, (int, float)):
+                return float(v)
+            return _to_float_eu(v) or 0.0
+
+        imp      = _to_num(r.get("Importe", 0.0))
+        com_val  = _to_num(r.get("Comisión", r.get("Comision", 0)))  # ← tilde y fallback
+        iva_val  = _to_num(r.get("IVA", 0.0))
+        irpf_val = _to_num(r.get("IRPF", 0.0))
+        neto_val = _to_num(r.get("Importe Neto", 0.0))
+
+        # Caso especial: Comisión bancaria → comisión = importe, sin IVA/IRPF
+        if "comisión bancaria" in tipo_str.lower() or "comision bancaria" in tipo_str.lower():
+            com_val  = imp
+            iva_val  = 0.0
+            irpf_val = 0.0
+            neto_val = abs(imp)
+
         preview_rows.append({
-            "Fecha": r["Fecha"],
+            "Fecha": r.get("Fecha", ""),
             "Concepto": concepto_preview,
-            "Tipo": r["Tipo"],
-            "Importe": _fmt_eur(float(r["Importe"])),
-            "Comisión": _fmt_eur(float(r["Comisión"])),
-            "IVA": _fmt_eur(float(r["IVA"])),
-            "IRPF": _fmt_eur(float(r["IRPF"])),
-            "Total": _fmt_eur(float(r["Total"])), # <-- Modificado para Total
+            "Tipo": tipo_str,
+            "Importe": _fmt_eur(imp),
+            "Comisión": _fmt_eu(com_val),
+            "Comision": _fmt_eu(com_val),
+
+            "IVA": _fmt_eur(iva_val),
+            "IRPF": _fmt_eur(irpf_val),
+            "Importe Neto": _fmt_eur(neto_val),
         })
+
     x_preview = json.dumps({"Filas": int(len(out_df)), "Muestra": preview_rows}, ensure_ascii=True)
 
     # 5) Generar Excel (hoja única Movimientos_desglosados)
@@ -535,8 +545,9 @@ async def bankflowpro(
             cell.border = Border()
 
         euro_fmt = '#,##0.00'
-        # D..H (Importe, Comisión, IVA, IRPF, Total)
+        # D..H (Importe, Comisión, IVA, IRPF, Importe Neto)
         for col_idx in range(4, 9):
+
             col_letter = get_column_letter(col_idx)
             for cell in ws[col_letter][1:]:
                 cell.number_format = euro_fmt
@@ -594,3 +605,10 @@ async def bankflowpro(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers=headers
     )
+# =========================
+# Lanzador local
+# =========================
+if __name__ == "__main__":
+    import uvicorn
+    print("✅ FastAPI corriendo en http://127.0.0.1:8010")
+    uvicorn.run("main:app", host="127.0.0.1", port=8010, reload=True)
