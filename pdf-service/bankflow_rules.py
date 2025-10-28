@@ -77,7 +77,7 @@ TIPO_RULES: list[tuple[list[str], str, float, float]] = [
 
 IVA_CERO_FORZADO = [
     "transferencia internacional", "ltd.", "gmbh", "licencia", "licencias",
-    "comision", "comisiones", "retenciones e ing. a cta. ggee", "ppl", "eniv",
+    "comision", "comisiones", "retenciones e ing. a cta. ggee", "ppl", "eniv","drawdown",
     "constructora",
 ]
 
@@ -115,8 +115,12 @@ def _clasificar(concepto: str) -> Clasificacion:
                 es_comision_banco = True
             break
 
-    if _contains_any(txt, IVA_CERO_FORZADO):
-        iva = 0.0
+    # Excepción: DALUX siempre lleva IVA 21 %
+    if "dalux" in txt:
+      iva = 0.21
+    elif _contains_any(txt, IVA_CERO_FORZADO):
+      iva = 0.0
+
 
     return Clasificacion(
         tipo=tipo or "",
@@ -143,10 +147,16 @@ def _calcula_linea(concepto: str, importe: float, disable_fixed_commission: bool
 
     comision = 0.0
     if not disable_fixed_commission and not clas.es_remesa and not clas.es_comision_banco:
-        if importe > 0:
-            comision = 1.0
+        # Jamás aplicar comisión positiva.
+        # También evitar comisión si el concepto contiene ENIV o Drawdown.
+        txt_concepto = _norm_text(concepto)
+        if "eniv" in txt_concepto or "drawdown" in txt_concepto:
+            comision = 0.0
         elif importe < 0:
             comision = -1.0
+        else:
+            comision = 0.0
+
 
     tipo = clas.tipo or ("Comisión bancaria" if clas.es_comision_banco else "General")
 
@@ -178,54 +188,59 @@ def _calcula_linea(concepto: str, importe: float, disable_fixed_commission: bool
     elif abs(delta) > 0.02 and abs(base_r) > 0:
         base_r = _redondea2(base_r + delta)
 
-    total_r = _redondea2(base_r + iva_r + irpf_r + com_r)
-    
-    if abs(importe_r - total_r) > 0.001:
-        total_r = importe_r
+    # Nuevo cálculo: Importe Neto = |Importe| - |IVA| - |IRPF|
+    importe_neto = _redondea2(abs(importe_r) - abs(iva_r) - abs(irpf_r))
 
-    return (tipo, com_r, iva_r, irpf_r, total_r)
+    return (tipo, com_r, iva_r, irpf_r, importe_neto)
+
 
 # =========================
 # API pública — Reglas generales
 # =========================
 
-
 def apply_accounting_rules(df: pd.DataFrame) -> pd.DataFrame:
     """
     Aplica reglas a DataFrame con columnas:
-    Fecha | Concepto | Tipo | Importe | Comisión | IVA | IRPF | Total
+    Fecha | Concepto | Tipo | Importe | Comisión | IVA | IRPF | Importe Neto
     """
     if df is None or df.empty:
         return df
 
     # --- Volvemos a "Total" ---
-    required = ["Fecha", "Concepto", "Tipo", "Importe", "Comisión", "IVA", "IRPF", "Total"]
+    required = ["Fecha", "Concepto", "Tipo", "Importe", "Comisión", "IVA", "IRPF", "Importe Neto"]
+
+    # Alias temporal por compatibilidad
+    if "Importe Neto" in df.columns and "Total" not in df.columns:
+        df["Total"] = df["Importe Neto"]
+
     for c in required:
         if c not in df.columns:
             raise ValueError(f"apply_accounting_rules: falta la columna '{c}'")
 
     out = df.copy()
 
-    tipos, coms, ivas, irpfs, totals = [], [], [], [], []
+    tipos, coms, ivas, irpfs, totales = [], [], [], [], []
     for _, row in out.iterrows():
-        concepto = str(row.get("Concepto", "") or "")
+        concepto = str(row.get("Concepto", "")) or ""
         try:
             importe = float(row.get("Importe", 0.0) or 0.0)
         except Exception:
             importe = _to_float_eu(row.get("Importe", "0")) or 0.0
+
 
         tipo, com, iva, irpf, total = _calcula_linea(concepto, importe)
         tipos.append(tipo)
         coms.append(com)
         ivas.append(iva)
         irpfs.append(irpf)
-        totals.append(total) # <-- Guardamos el Total
+        totales.append(total) # <-- Guardamos el Total
 
     out["Tipo"] = tipos
     out["Comisión"] = coms
     out["IVA"] = ivas
     out["IRPF"] = irpfs
-    out["Total"] = totals # <-- Asignamos el Total
+    out["Importe Neto"] = totales # <-- Asignamos el nuevo Importe Neto
+
     return out
 
 # =========================
@@ -366,7 +381,8 @@ def expand_remesas(extract_df: pd.DataFrame, detalle_df: Optional[pd.DataFrame])
             out_rows.append(r.to_dict())
 
     # --- Volvemos a "Total" ---
-    expanded_df = pd.DataFrame(out_rows, columns=["Fecha", "Concepto", "Tipo", "Importe", "Comisión", "IVA", "IRPF", "Total"])
+    expanded_df = pd.DataFrame(out_rows, columns=["Fecha", "Concepto", "Tipo", "Importe", "Comisión", "IVA", "IRPF", "Importe Neto"])
+
     return expanded_df, avisos
 
 # =========================

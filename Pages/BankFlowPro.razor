@@ -8,12 +8,13 @@
     <section class="df-section bankflow">
 
         <div class="bankflow-head">
-    <h2>BankFlow Pro</h2>
-    <img class="bankflow-logo" src="/Images/bankflowpro-logo.png" alt="BankFlow Pro" />
-</div>
-     <div class="bankflow-description"> <p>Procesa extractos bancarios y desglosa remesas automáticamente</p>
+            <h2>BankFlow Pro</h2>
+            <img class="bankflow-logo" src="/Images/bankflowpro-logo.png" alt="BankFlow Pro" />
         </div>
 
+        <div class="bankflow-description">
+            <p>Procesa extractos bancarios y desglosa remesas automáticamente</p>
+        </div>
 
         <!-- Extracto -->
         <div class="df-upload">
@@ -74,7 +75,7 @@
                             <th>Comisión</th>
                             <th>IVA</th>
                             <th>IRPF</th>
-                            <th>Total</th>
+                            <th>Importe Neto</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -88,7 +89,7 @@
                                 <td>@row.Comision</td>
                                 <td>@row.IVA</td>
                                 <td>@row.IRPF</td>
-                                <td>@row.Total</td>
+                                <td>@row.ImporteNeto</td>
                             </tr>
                         }
                     </tbody>
@@ -100,17 +101,13 @@
 </div>
 
 @code {
-    // Estado
     IBrowserFile? Extracto = null;
     IBrowserFile? Remesa = null;
     bool IsProcessing = false;
     bool ProcessOk = false;
-
-    // Nombres para mostrar junto a los botones
     string? _extractoName;
     string? _remesaName;
 
-    // Preview
     class PreviewRow
     {
         public string Fecha { get; set; } = "";
@@ -120,11 +117,11 @@
         public string Comision { get; set; } = "";
         public string IVA { get; set; } = "";
         public string IRPF { get; set; } = "";
-        public string Total { get; set; } = "";
+        public string ImporteNeto { get; set; } = "";
     }
+
     List<PreviewRow>? Preview;
 
-    // Handlers de selección (guardan archivo y nombre)
     void OnExtractoSelected(InputFileChangeEventArgs e)
     {
         Extracto = e.File;
@@ -143,7 +140,6 @@
         StateHasChanged();
     }
 
-    // Procesamiento
     async Task ProcesarArchivos()
     {
         if (Extracto is null) return;
@@ -155,14 +151,12 @@
 
         using var form = new MultipartFormDataContent();
 
-        // Extracto (obligatorio)
         var extMs = new MemoryStream();
         await Extracto.OpenReadStream(long.MaxValue).CopyToAsync(extMs);
         var extContent = new ByteArrayContent(extMs.ToArray());
         extContent.Headers.ContentType = new MediaTypeHeaderValue(Extracto.ContentType ?? "application/octet-stream");
         form.Add(extContent, "extracto", Extracto.Name);
 
-        // Detalle Remesas (opcional)
         if (Remesa is not null)
         {
             var remMs = new MemoryStream();
@@ -172,13 +166,15 @@
             form.Add(remContent, "detalle_remesas", Remesa.Name);
         }
 
+        var content = form;
+
         HttpResponseMessage resp = null!;
         byte[] excelBytes = Array.Empty<byte>();
         string fileName = "Movimientos_desglosados.xlsx";
 
         try
         {
-            resp = await Http.PostAsync("http://localhost:8000/api/bankflowpro", form);
+            resp = await Http.PostAsync("http://127.0.0.1:8010/api/bankflowpro", content);
             if (!resp.IsSuccessStatusCode)
             {
                 var msg = await resp.Content.ReadAsStringAsync();
@@ -189,7 +185,6 @@
                 return;
             }
 
-            // Nombre de archivo (Content-Disposition)
             var cd = resp.Content.Headers.ContentDisposition;
             if (cd?.FileNameStar is not null) fileName = cd.FileNameStar.Trim('"');
             else if (cd?.FileName is not null) fileName = cd.FileName.Trim('"');
@@ -197,7 +192,6 @@
             excelBytes = await resp.Content.ReadAsByteArrayAsync();
             ProcessOk = true;
 
-            // Parsear cabecera X-Preview
             if (resp.Headers.TryGetValues("X-Preview", out var prevVals))
             {
                 var previewJson = prevVals.FirstOrDefault();
@@ -218,34 +212,22 @@
                                     Concepto = el.TryGetProperty("Concepto", out var c) ? c.GetString() ?? "" : "",
                                     Tipo = el.TryGetProperty("Tipo", out var t) ? t.GetString() ?? "" : "",
                                     Importe = el.TryGetProperty("Importe", out var i) ? i.GetString() ?? "" : "",
-                                    Comision = el.TryGetProperty("Comisión", out var cm)
-                                        ? (cm.GetString() ?? "")
-                                        : (el.TryGetProperty("Comision", out var cm2) ? (cm2.GetString() ?? "") : ""),
+                                    Comision = el.TryGetProperty("Comision", out var cm) ? cm.GetString() ?? "" : "",
                                     IVA = el.TryGetProperty("IVA", out var v) ? v.GetString() ?? "" : "",
                                     IRPF = el.TryGetProperty("IRPF", out var r) ? r.GetString() ?? "" : "",
-                                    Total = el.TryGetProperty("Total", out var tt) ? tt.GetString() ?? "" : ""
+                                    ImporteNeto = el.TryGetProperty("Importe Neto", out var n) ? n.GetString() ?? "" : ""
                                 });
                             }
                             if (list.Count > 0) Preview = list;
                         }
-                        else
-                        {
-                            // Fallback: por si viene como lista directa
-                            Preview = JsonSerializer.Deserialize<List<PreviewRow>>(previewJson, opts);
-                        }
                     }
                     catch
                     {
-                        try
-                        {
-                            Preview = JsonSerializer.Deserialize<List<PreviewRow>>(previewJson, opts);
-                        }
-                        catch { /* sin preview */ }
+                        Preview = JsonSerializer.Deserialize<List<PreviewRow>>(previewJson, opts);
                     }
                 }
             }
 
-            // Descargar Excel
             var base64 = Convert.ToBase64String(excelBytes);
             await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, base64);
         }
@@ -262,7 +244,6 @@
 }
 
 <style>
-    /* Mostrar nombre del archivo junto al botón */
     .df-filepick {
         display: flex;
         align-items: center;
@@ -276,8 +257,13 @@
         word-break: break-all;
     }
 
-    /* Ya tenías esto: en .bankflow se ocultan los input[type=file] */
     .bankflow input[type="file"] {
         display: none;
+    }
+
+    .df-hint {
+        font-size: 0.9rem;
+        color: var(--df-muted);
+        margin-bottom: 0.5rem;
     }
 </style>
