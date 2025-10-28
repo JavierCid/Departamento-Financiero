@@ -14,7 +14,26 @@ from bankflow_rules import process_bankflow  # ← Usamos el pipeline completo
 # =========================
 # App + CORS
 # =========================
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI()
+
+# <<< AÑADE ESTO PARA BLÁZOR LOCAL >>>
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:7252",
+        "https://localhost:7252",
+        "http://127.0.0.1:7252",
+        "https://127.0.0.1:7252",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+# <<< FIN CORS >>>
+
 
 ALLOWED_ORIGINS = [
     "http://localhost:7252",
