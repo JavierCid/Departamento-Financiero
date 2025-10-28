@@ -1,4 +1,5 @@
-﻿@inherits LayoutComponentBase
+﻿@using Microsoft.AspNetCore.Components.Web
+@inherits LayoutComponentBase
 
 <div class="df-app">
     <header class="df-header">
@@ -8,18 +9,13 @@
                 <span style="font-family: 'Segoe UI Semilight', 'Helvetica Neue', sans-serif; font-weight: 400; letter-spacing: 0.4px;">
                     Momentum Real Estate S.L.
                 </span>
-
-
             </a>
 
-
             <nav class="df-nav">
-                <a href="/" class="df-nav__link">Inicio</a>
-                <a href="/procesar-pdfs" class="df-nav__link">Procesar facturas</a>
-
-                <NavLink href="/upload-excel" class="df-nav__link" Match="NavLinkMatch.All">Contraste Prinex</NavLink>
-
-
+                <NavLink href="/" class="df-nav__link" Match="NavLinkMatch.All">Inicio</NavLink>
+                <NavLink href="/procesar-pdfs" class="df-nav__link">Procesar facturas</NavLink>
+                <NavLink href="/upload-excel" class="df-nav__link">Contraste Prinex</NavLink>
+                <NavLink href="/bankflowpro" class="df-nav__link">BankFlow Pro</NavLink>
             </nav>
         </div>
     </header>

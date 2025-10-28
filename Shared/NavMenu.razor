@@ -1,22 +1,25 @@
-﻿@inherits LayoutComponentBase
+﻿@using Microsoft.AspNetCore.Components.Web 
+@inherits LayoutComponentBase
 
 <div class="df-app">
     <header class="df-header">
         <div class="df-header__inner">
             <a href="/" class="df-brand">
                 <img src="Images/momentum-logo.png" alt="Momentum" class="df-logo" />
-
-                <span>Departamento Financiero</span>
+                <span style="font-family: 'Segoe UI Semilight', 'Helvetica Neue', sans-serif; font-weight: 400; letter-spacing: 0.4px;">
+                    Momentum Real Estate S.L.
+                </span>
             </a>
 
             <nav class="df-nav">
                 <NavLink href="/" class="df-nav__link" Match="NavLinkMatch.All">Inicio</NavLink>
-                <NavLink href="/procesar-pdfs" class="df-nav__link">Procesar PDFs</NavLink>
-                <NavLink href="/upload-excel" class="df-nav__link">Subir Excel</NavLink>
+                
+                <NavLink href="/procesar-pdfs" class="df-nav__link">Procesar facturas</NavLink>
+                <NavLink href="/upload-excel" class="df-nav__link">Contraste Prinex</NavLink>
+                <NavLink href="/bankflowpro" class="df-nav__link">BankFlow Pro</NavLink>
             </nav>
         </div>
     </header>
-
 
     <main class="df-main">
         <div class="df-container">
@@ -24,6 +27,7 @@
         </div>
     </main>
 
-    @* (eliminar el footer duplicado) *@
-
+    <footer class="df-footer">
+        © @(DateTime.Now.Year) Departamento Financiero — Sistema interno de automatización
+    </footer>
 </div>

@@ -1,9 +1,21 @@
 ﻿@page "/procesar-pdfs"
 @using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Web
 @inject HttpClient Http
 @inject IJSRuntime JS
 
-<h3>Procesador de facturas</h3>
+<div class="page-procesar">
+    <div class="pdf-head">
+        <h3>Procesador de facturas</h3>
+        <img class="pdf-logo" src="/Images/pdf_logo.png" alt="PDFFlow" />
+    </div>
+
+    <div class="pdf-desc">
+        Desglose de facturas y extracción automática del contenido en formato estructurado
+    </div>
+    <!-- el resto de la página (uploader, dropzone, etc.) -->
+</div>
+
 
 <div class="df-uploader">
     <div class="df-filepick">
@@ -14,17 +26,23 @@
     <button class="btn btn-primary" @onclick="Enviar" disabled="@(!_canSend || _busy)">
         @(_busy ? "Procesando..." : "Procesar")
     </button>
-</div>
 
-<!-- Dropzone que usa un InputFile invisible para capturar drop y click -->
-<div class="df-drop">
-    <div class="df-drop__label">
-        <strong>
-            Arrastra aquí tus facturas
-        </strong>
-        <div class="text-muted small">…o usa “Seleccionar archivos (PDF)”.</div>
-    </div>
+    
+</div>
+<!-- Dropzone elegante (look BankFlow Pro) con área clicable completa -->
+<div class="@($"df-drop df-drop--hero{(_drag ? " drag" : "")}")"
+     @ondragover:preventDefault
+     @ondrop:preventDefault
+     @ondragenter="() => SetDrag(true)"
+     @ondragleave="() => SetDrag(false)"
+     @ondrop="() => SetDrag(false)">
+
+
     <InputFile class="df-drop__input" OnChange="OnFilesSelected" multiple accept=".pdf" />
+
+    <div class="df-drop__icon"><i class="bi bi-filetype-pdf"></i></div>
+    <div class="df-drop__title">Arrastra aquí tus facturas</div>
+    <div class="df-drop__hint">…o usa “Seleccionar archivos (PDF)”</div>
 </div>
 
 @if (_files.Count > 0)
@@ -98,6 +116,11 @@ else if (!string.IsNullOrWhiteSpace(_previewJson))
 }
 
 @code {
+    // ---- Drag state para el dropzone ----
+    bool _drag = false;
+    
+    void SetDrag(bool v) => _drag = v;
+
     // -------- Config --------
     const string EndpointPdf = "http://127.0.0.1:8000/api/pdf2excel";
 
@@ -161,7 +184,6 @@ else if (!string.IsNullOrWhiteSpace(_previewJson))
             await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, Convert.ToBase64String(bytesOut));
 
             _ok = "Procesamiento exitoso";
-
             _files.Clear();
         }
         catch (Exception ex)
