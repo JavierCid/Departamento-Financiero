@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pdfplumber
+pandas
+openpyxl
+pydantic
+python-multipart
+# (opcional OCR)
+pytesseract
+pdf2image
