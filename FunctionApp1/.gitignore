@@ -1,0 +1,13 @@
+﻿.vs/
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.sln.docstates
+**/bin/
+**/obj/
+.vscode/
+.DS_Store
+Thumbs.db
+local.settings.json
+**/local.settings.json
