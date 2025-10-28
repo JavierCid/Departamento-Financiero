@@ -1,5 +1,6 @@
 ﻿@page "/upload-excel"
 @page "/uploadexcel"
+@page "/contrasteprinex"
 
 @using System.Net.Http.Headers
 @using System.Text.Json
@@ -9,8 +10,15 @@
 @inject HttpClient Http
 @inject IJSRuntime JS
 
-<h3>Contraste Prinex</h3>
+<div class="prinex-head">
+    <h3>Contraste Prinex</h3>
+    
+    <img class="prinex-logo" src="/Images/prinex_logo.png" alt="Prinex" />
+</div>
 
+<div class="prinex-desc">
+    Cruza los datos de facturación de Prinex con los importes registrados en el libro mayor
+</div>
 <!-- Uploader unificado (mismo look que Procesar facturas) -->
 <div class="df-uploader">
     <div class="df-filepick">
@@ -22,6 +30,29 @@
         @(_busy ? "Procesando..." : "Procesar")
     </button>
 </div>
+
+<!-- Dropzone elegante (look BankFlow Pro) -->
+<div class="@($"df-drop df-drop--hero{(_drag ? " drag" : "")}")"
+     @ondragover:preventDefault
+     @ondragenter="() => SetDrag(true)"
+     @ondragleave="() => SetDrag(false)"
+     @ondrop="() => SetDrag(false)">
+
+    <InputFile class="df-drop__input" OnChange="OnFileSelected" accept=".xlsx,.xls,.csv" />
+
+    <div class="df-drop__icon"><i class="bi bi-file-earmark-spreadsheet"></i></div>
+
+    <div class="df-drop__title">Arrastra aquí tu archivo</div>
+    <div class="df-drop__hint">…o usa “Seleccionar archivo (Excel)”</div>
+</div>
+
+<!-- Nombre del archivo seleccionado -->
+@if (_selectedFile is not null)
+{
+    <div class="df-files">
+        <div class="item">@_selectedFile.Name</div>
+    </div>
+}
 
 @if (!string.IsNullOrWhiteSpace(_success))
 {
@@ -87,11 +118,20 @@
     // ---- Estado ----
     IBrowserFile? _selectedFile;
     bool _busy;
+    bool _drag = false;
     bool _canSend => _selectedFile is not null;
 
     string? _success;
     string? _error;
     PreviewDto? _preview;
+
+    // ---- Drag & Drop ----
+    void HandleDragOver(DragEventArgs e)
+    {
+        _ = e.DataTransfer; // fuerza acceso
+    }
+
+    void SetDrag(bool v) => _drag = v;
 
     // ---- Selección ----
     void OnFileSelected(InputFileChangeEventArgs e)
@@ -118,7 +158,6 @@
             content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
             content.Headers.Add("X-File-Name", _selectedFile.Name);
 
-            // Backend (Functions local)
             const string apiUrl = "http://localhost:7127/api/ProcesarExcel";
 
             var resp = await Http.PostAsync(apiUrl, content);
