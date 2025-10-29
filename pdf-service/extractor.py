@@ -1,5 +1,21 @@
 import re
 from typing import Optional, Dict, Any, List
+import json, os
+
+# =========================
+# Proveedores conocidos (palabras clave -> nombre completo)
+# =========================
+KNOWN_SUPPLIERS: dict[str, str] = {}
+
+try:
+    # Carga desde un archivo externo "proveedores.json" si existe
+    path_json = os.path.join(os.path.dirname(__file__), "proveedores.json")
+    if os.path.exists(path_json):
+        with open(path_json, "r", encoding="utf-8") as f:
+            KNOWN_SUPPLIERS = json.load(f)
+except Exception:
+    KNOWN_SUPPLIERS = {}
+
 
 # =========================
 # Utilidades texto / truncado
@@ -13,7 +29,7 @@ def _clean_text(txt: str) -> str:
     txt = re.sub(r"[ \t]+", " ", txt)
     return txt.strip()
 
-def _truncate(s: Optional[str], maxlen: int = 27) -> Optional[str]:
+def _truncate(s: Optional[str], maxlen: int = 22) -> Optional[str]:
     if s is None:
         return None
     s = str(s).strip()
@@ -23,7 +39,7 @@ def _truncate(s: Optional[str], maxlen: int = 27) -> Optional[str]:
     suffix = " (...)"
     return s[: maxlen - len(suffix)] + suffix
 
-def _clean_and_shorten_concept(s: Optional[str], maxlen: int = 27) -> Optional[str]:
+def _clean_and_shorten_concept(s: Optional[str], maxlen: int = 22) -> Optional[str]:
     if not s:
         return None
     s = re.sub(r"\s{2,}", " ", s).strip()
@@ -120,9 +136,16 @@ def _find_amount_after(label: str, text: str) -> Optional[float]:
     return _clean_amount(m.group(1)) if m else None
 
 def _find_amount_line_start(label: str, text: str) -> Optional[float]:
-    pat = rf"(?m)^\s*{label}\b.*?{_M_AMT}(?!\s*%)\s*(?:{CUR})?"
+    """
+    Línea que empieza con `label` y contiene un importe; ignora porcentajes (ej. '21 %').
+    Nota: sin \b tras label para casar 'TOTAL I.V.A.' / 'TOTAL IVA'.
+    """
+    # Captura el primer importe de la línea cuyo label coincide, excluyendo valores seguidos de '%'
+    pat = rf"(?m)^\s*{label}.*?{_M_AMT}(?!\s*%)\s*(?:{CUR})?"
     m = re.search(pat, text, flags=re.I)
     return _clean_amount(m.group(1)) if m else None
+
+
 
 def _find_amount_below(label: str, text: str) -> Optional[float]:
     """
@@ -223,23 +246,31 @@ def _guess_supplier(text: str) -> Optional[str]:
     # 2) Heurística: buscar la primera línea con S.L./S.A. que NO parezca
     # un bloque de dirección del destinatario (calle, nº, piso, CP, ciudad…).
     lines = [ln.strip() for ln in text.splitlines()]
+    detected_name = None
+
     for i, ln in enumerate(lines):
         m = re.match(r"^([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ\s\.\-&]+(?:S\.L\.|S\.A\.))\b", ln)
         if not m:
             continue
 
-        # Mira 1–2 líneas siguientes: si huelen a dirección, sáltalas (probable destinatario).
         nxt = " ".join(lines[i+1:i+3])
         if re.search(r"\b(C\/|C\.|CALLE|AVENIDA|AVDA|CL|Pº|PASEO|Nº|NUM|PISO|PLANTA|MADRID|BARCELONA|VALENCIA|\d{2}\s*\d{3}|ESPAÑA)\b",
                      nxt, flags=re.I):
             continue
 
-        name = re.sub(r"\s+", " ", m.group(1)).strip(" .-")
-        # corta si hay “CIF/NIF/VAT” en la misma línea
-        name = re.split(r"\b(CIF|C\.I\.F\.?|NIF|VAT)\b", name, 1, flags=re.I)[0]
-        return name
+        detected_name = re.sub(r"\s+", " ", m.group(1)).strip(" .-")
+        detected_name = re.split(r"\b(CIF|C\.I\.F\.?|NIF|VAT)\b", detected_name, 1, flags=re.I)[0]
+        return detected_name
+
+    # 3) Si no se detectó proveedor por heurística, buscar coincidencia parcial en lista externa
+    if not detected_name and KNOWN_SUPPLIERS:
+        for needle, full in KNOWN_SUPPLIERS.items():
+            if needle.lower() in text.lower():
+                return full
 
     return None
+
+
 def _guess_invoice(text: str) -> Optional[str]:
     for p in [
         r"factura\s*(?:nº|n\.|no|number|#)?\s*[:\-]?\s*([A-Z0-9\/\.\-]*\d[A-Z0-9\/\.\-]*)",
@@ -291,9 +322,26 @@ def extract_fields_from_text(text: str, filename: str = "") -> Dict[str, Any]:
                 break
 
     # --- Importes (igual que antes) ---
-    labels_total = ["Total", "Total factura", "Importe total", "Total bruto", "Total a pagar", "Total amount", "TOTAL EUROS", "SUMAN"]
-    labels_base  = ["Base imponible", "Base", "Subtotal", "Neto", "Taxable base"]
-    labels_iva   = ["IVA", r"I\.?\s*V\.?\s*A\.?", "VAT", "Impuesto"]
+    labels_total = [
+    "Total", "Total factura", "Importe total", "Total bruto", "Total a pagar",
+    "Total amount", "TOTAL EUROS", "SUMAN", "TOTAL FACTURA", "TOTAL A PAGAR",
+    "Total Factura Euros"  # <- aparece así en tu PDF
+    ]
+
+    labels_base  = ["Base imponible", "Base", "Subtotal", "Neto", "Taxable base", "TOTAL BASE"]
+
+    labels_iva   = [
+        "IVA",
+        r"I\.?\s*V\.?\s*A\.?",          # I.V.A / IVA con puntos/espacios
+        r"TOTAL\s+IVA",
+        r"TOTAL\s+I\.?\s*V\.?\s*A\.?",  # TOTAL I.V.A.
+        "VAT",
+        "Impuesto",
+        "TOTAL I.V.A.",                 # literal exacto por si acaso
+        "TIPO DE I.V.A."                # (por si algún proveedor pone solo el %)
+    ]
+
+
     labels_irpf  = ["IRPF", "Retención", "Withholding"]
 
     total_bruto = None
@@ -309,18 +357,63 @@ def extract_fields_from_text(text: str, filename: str = "") -> Dict[str, Any]:
             break
 
     iva_eur = None
-    for L in labels_iva:
-        iva_eur = (_find_amount_line_start(L, t) or
-                   _find_amount_after(L, t) or
-                   _find_amount_below(L, t))
-        if iva_eur is not None:
-            break
+
+    # Captura directa en la misma línea (soporta I.V.A. / TOTAL I.V.A.)
+    if iva_eur is None:
+        m_iva = re.search(
+            rf"(?im)^\s*(?:total\s+)?i\W*v\W*a\W*[:\-]?\s*{_M_AMT}(?!\s*%)\s*(?:{CUR})?\s*$",
+            t
+        )
+        if m_iva:
+            iva_eur = _clean_amount(m_iva.group(1))
+
+    # Si no lo pillamos arriba, probamos con las heurísticas habituales
+    if iva_eur is None:
+        for L in labels_iva:
+            iva_eur = (_find_amount_line_start(L, t) or
+                       _find_amount_after(L, t) or
+                       _find_amount_below(L, t))
+            if iva_eur is not None:
+                break
+
 
     irpf = None
     for L in labels_irpf:
         irpf = _find_amount_line_start(L, t) or _find_amount_after(L, t)
         if irpf is not None:
             break
+
+    # --- Fallback 1: si hay % de IVA cerca pero no valor en €, calcula desde Base ---
+    if iva_eur is None and neto_base is not None:
+        pct_match = re.search(
+            r"(?:IVA|I\.?\s*V\.?\s*A\.?|TIPO\s+DE\s+I\.?\s*V\.?\s*A\.?)"
+            r"[^\n\r]{0,60}?(\d{1,2}(?:[.,]\d{1,2})?)\s*%",
+            t, flags=re.I
+        )
+        if pct_match:
+            try:
+                pct_str = pct_match.group(1).replace(",", ".")
+                rate = float(pct_str) / 100.0
+                iva_eur = round(neto_base * rate, 2)
+            except Exception:
+                pass
+
+    # --- Fallback 2: si SIGUE sin haber IVA y Neto != Bruto, aplica 21% (regla negocio) ---
+    if iva_eur is None and neto_base is not None:
+        if total_bruto is not None:
+            # Solo si realmente hay diferencia entre Total y Neto
+            if abs(total_bruto - neto_base) > 0.05:
+                iva_eur = round(total_bruto - neto_base - (irpf or 0.0), 2)
+                # Si la diferencia no era consistente (negativa rara), fuerza 21%
+                if iva_eur is None or iva_eur < 0:
+                    iva_eur = round(neto_base * 0.21, 2)
+                    total_bruto = round(neto_base + iva_eur + (irpf or 0.0), 2)
+        else:
+            # No hay Total pero hay Neto: compón Total al 21%
+            iva_eur = round(neto_base * 0.21, 2)
+            total_bruto = round(neto_base + iva_eur + (irpf or 0.0), 2)
+
+
 
     # === Reglas de coherencia (igual que tenías) ===
     EPS = 0.05
@@ -368,11 +461,11 @@ def extract_fields_from_text(text: str, filename: str = "") -> Dict[str, Any]:
         "Invoice_full": invoice_full,
         "Concepto_full": concepto_full,
 
-        # SHORT (para vista previa; mantiene tu límite ~27)
-        "Proveedor": _truncate(supplier_full, 27),
-        "Fecha": _truncate(fecha, 27),
-        "Invoice": _truncate(invoice_full, 27),
-        "Concepto": _clean_and_shorten_concept(concepto_full, 27),
+        # SHORT (para vista previa; límite 22)
+        "Proveedor": _truncate(supplier_full, 22),
+        "Fecha": _truncate(fecha, 22),
+        "Invoice": _truncate(invoice_full, 22),
+        "Concepto": _clean_and_shorten_concept(concepto_full, 22),
 
         # Importes
         "Importe bruto": total_bruto,
@@ -382,6 +475,7 @@ def extract_fields_from_text(text: str, filename: str = "") -> Dict[str, Any]:
     }
 
     return fields
+
 # =========================
 # Por páginas (para app.py)
 # =========================
