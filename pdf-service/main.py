@@ -233,19 +233,77 @@ def _fmt_eu(v: float | None) -> str:
 # Parser PDFs (pdf2excel)
 # =========================
 
-
 def parse_pdf_to_df(pdf_bytes: bytes, nombre_archivo: str) -> pd.DataFrame:
+    import pytesseract
+    from pdf2image import convert_from_bytes
+    import os
+
+    # --- Configuración rutas OCR (opcional si no están en PATH) ---
+    tess = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    if os.path.exists(tess):
+        pytesseract.pytesseract.tesseract_cmd = tess
+
+    POPPLER_BIN = r"C:\tools\poppler\Library\bin"  # ajusta si usaste otra ruta
+    use_poppler = os.path.isdir(POPPLER_BIN)
+
+    # 1) Intento de extracción de texto nativo (PDF con texto embebido)
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         pages_texts = []
         for p in pdf.pages:
             t = p.extract_text() or ""
+            # Si la página viene vacía o con muy poco texto, forzamos OCR de esa página
+            if not t.strip() or len(t.strip()) < 40:
+                try:
+                    img = convert_from_bytes(
+                        pdf_bytes,
+                        first_page=p.page_number,
+                        last_page=p.page_number,
+                        poppler_path=POPPLER_BIN if use_poppler else None,
+                        dpi=300
+                    )[0]
+                    ocr_text = pytesseract.image_to_string(
+                        img,
+                        lang="spa+eng",
+                        config="--oem 1 --psm 6"
+                    )
+
+                    if ocr_text.strip():
+                        pages_texts.append(ocr_text)
+                        continue
+                except Exception as e:
+                    print(f"[WARN] OCR page {p.page_number} failed: {e}")
+            # Si había texto suficiente, nos quedamos con el de pdfplumber
             if t.strip():
                 pages_texts.append(t)
 
+    # 2) Si aun así no hay nada, OCR al documento completo como último recurso
+    if not pages_texts:
+        try:
+            images = convert_from_bytes(
+                pdf_bytes,
+                poppler_path=POPPLER_BIN if use_poppler else None,
+                dpi=300
+            )
+            for img in images:
+                ocr_text = pytesseract.image_to_string(
+                    img,
+                    lang="spa+eng",
+                    config="--oem 1 --psm 6"
+                )
+
+                if ocr_text.strip():
+                    pages_texts.append(ocr_text)
+        except Exception as e:
+            print(f"[WARN] OCR fallback failed: {e}")
+
+    # 3) Parseo de campos
     fields = extract_from_pages(pages_texts, nombre_archivo)
 
     proveedor = fields.get("Proveedor_full") or fields.get("Proveedor")
-    invoice = fields.get("Invoice_full") or fields.get("Invoice") or fields.get("Factura") or fields.get("Nº factura")
+    invoice = (
+        fields.get("Invoice_full") or fields.get("Invoice")
+        or fields.get("Factura") or fields.get("Nº factura")
+    )
     concepto = fields.get("Concepto_full") or fields.get("Concepto")
 
     row = {
@@ -256,11 +314,16 @@ def parse_pdf_to_df(pdf_bytes: bytes, nombre_archivo: str) -> pd.DataFrame:
         "Neto": fields.get("Neto"),
         "IVA": fields.get("IVA"),
         "IRPF": fields.get("IRPF"),
-        "Importe Bruto": fields.get("Importe bruto") or fields.get("Total Bruto") or fields.get("Bruto"),
+        "Importe Bruto": (
+            fields.get("Importe bruto")
+            or fields.get("Total Bruto")
+            or fields.get("Bruto")
+        ),
     }
 
     cols = ["Proveedor", "Fecha", "Invoice", "Concepto", "Neto", "IVA", "IRPF", "Importe Bruto"]
     return pd.DataFrame([row], columns=cols)
+
 
 # =========================
 # Endpoint PDF -> Excel

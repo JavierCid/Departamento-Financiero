@@ -8,3 +8,4 @@ python-multipart
 # (opcional OCR)
 pytesseract
 pdf2image
+pillow
