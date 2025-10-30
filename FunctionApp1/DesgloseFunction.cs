@@ -8,9 +8,9 @@ namespace FunctionApp1;
 
 public class DesgloseFunction
 {
-    [Function("DesglosarFacturas")]
+    [Function("pdf2excel")]
     public async Task<HttpResponseData> Run(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", "options")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", "options", Route = "pdf2excel")] HttpRequestData req)
     {
         if (req.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
         {
