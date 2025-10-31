@@ -451,35 +451,39 @@ import re
 
 def _norm_invoice_code(s: str | None) -> str:
     """
-    Normaliza códigos de factura para detectar coincidencias flexibles:
-    24-25/MA//1391 ↔ MA1391, 3020014885 ↔ 3020014885, etc.
+    Normaliza códigos de factura sin destruir su estructura.
+    - Conserva dígitos largos (3020014885)
+    - Une letras+números (MA1391)
+    - Quita solo ruido textual tipo 'Factura', 'Nº', 'Invoice', etc.
     """
     if not s:
         return ""
-
     import re
     t = str(s).upper().strip()
 
-    # Limpieza
+    # 1️⃣ Eliminar prefijos inútiles
     t = re.sub(r"\b(FACTURA|FAC|N[ºO]?|INVOICE|NO|NUMERO|NÚMERO|DOC|DOCUMENTO|S/FRA\.?)\b", "", t)
-    t = re.sub(r"[^\w]", " ", t)  # todo lo que no sea letra o número → espacio
 
-    # 🔹 Detecta “MA 1391”, “MA1391”, “24 25 MA 1391”, “24 MA 1391”, “MA-1391A”, etc.
-    m = re.search(r"\bMA\s*\d{2,6}[A-Z]?\b", t)
+    # 2️⃣ Mantener solo letras, números y separadores simples
+    t = re.sub(r"[^A-Z0-9\-/]", "", t)
+
+    # 3️⃣ Simplificar secuencias repetidas de separadores
+    t = re.sub(r"[-/]{2,}", "-", t)
+
+    # 4️⃣ Eliminar separadores iniciales o finales
+    t = t.strip("-/")
+
+    # 5️⃣ Casos comunes: “MA-1391”, “MA 1391”, “24-25/MA//1391” → MA1391, 1391, 2425MA1391
+    m = re.search(r"([A-Z]{1,5})[-/]?(\d{2,6})", t)
     if m:
-        return m.group(0).replace(" ", "")
+        return f"{m.group(1)}{m.group(2)}"
 
-    # 🔹 Detecta cualquier bloque “letras + números”
-    m2 = re.search(r"\b([A-Z]{1,5})\s*(\d{2,6})\b", t)
-    if m2:
-        return f"{m2.group(1)}{m2.group(2)}"
+    # 6️⃣ Si son solo dígitos largos
+    if re.fullmatch(r"\d{6,}", t):
+        return t
 
-    # 🔹 Detecta solo números largos
-    nums = re.findall(r"\d{5,}", t)
-    if nums:
-        return "".join(nums)
-
-    return re.sub(r"[^A-Z0-9]", "", t)
+    # 7️⃣ Si nada cuadra, devuélvelo limpio
+    return t
 
 def _pick_invoice_columns(df: pd.DataFrame) -> list[str]:
     """
@@ -581,65 +585,210 @@ async def contraste_facturas(
                 media_type="text/plain",
                 status_code=400,
             )
-        nombre = f.filename
-        # Detectar posibles códigos de factura dentro del nombre del archivo (más inteligente)
-        # Incluye combinaciones con letras y prioriza el más largo
+        nombre = f.filename.upper()
+
+           # 1️⃣ Extrae códigos principales normalizados
         matches = re.findall(
-            r"(INV\d{3,}|\d{8,}|\d{4}[-_/]\d{3,}|\b[A-Z]{2,}\d{2,}\b|\b\d{2,}[A-Z]{2,}\b)",
+            r"(?:INV\d{3,}|\b\d{6,}\b|\d{4}[-_/]\d{3,}|[A-Z]{1,5}[\s\-_/]*\d{2,6}|\d{2,6}[\s\-_/]*[A-Z]{1,5})",
             nombre.upper()
         )
-        # Priorizar el más largo (normalmente el número de factura real)
-        posibles_codigos = sorted(matches, key=len, reverse=True)
 
+        # Normaliza y separa letras/números pegados (ej: 84927TRAVI → 84927, TRAVI)
+        posibles_codigos = []
+        for m in matches:
+            nm = re.sub(r"[\s\-_/.]", "", m.strip().upper())
+            # Separar letras y números adyacentes
+            nm_split = re.split(r"(?<=\d)(?=[A-Z])|(?<=[A-Z])(?=\d)", nm)
+            for part in nm_split:
+                part = part.strip()
+                if part and part not in posibles_codigos:
+                    posibles_codigos.append(part)
 
         coincidencia = None
         razon = "No se detectó ningún código en el nombre del archivo"
-        if posibles_codigos:
-            for code in posibles_codigos:
-                code_norm = _norm_invoice_code(code)
-                if code_norm in excel_index:
-                    coincidencia = excel_index[code_norm]
+
+        # 2️⃣ Primera pasada: comparación normal con Excel
+        for code in posibles_codigos:
+            code_norm = _norm_invoice_code(code)
+            if code_norm in excel_index:
+                coincidencia = excel_index[code_norm]
+                razon = (
+                    f"'{code}' del archivo coincide con "
+                    f"celda (columna '{coincidencia['columna']}', fila {coincidencia['fila']}) → {coincidencia['valor']}"
+                )
+                break
+
+        # 3️⃣ Segunda pasada: solo si no hubo coincidencia, busca cualquier bloque de ≥4 alfanuméricos seguidos
+        if not coincidencia:
+            extra_blocks = re.findall(r"[A-Z0-9]{4,}", nombre.upper())
+            for eb in extra_blocks:
+                eb_norm = _norm_invoice_code(eb)
+                if eb_norm in excel_index:
+                    coincidencia = excel_index[eb_norm]
                     razon = (
-                        f"'{code}' del archivo coincide con "
+                        f"'{eb}' del archivo coincide con "
                         f"celda (columna '{coincidencia['columna']}', fila {coincidencia['fila']}) → {coincidencia['valor']}"
                     )
-
                     break
-            else:
-                razon = f"Ningún código del archivo ({', '.join(posibles_codigos)}) se encontró en el Excel"
+
+        if not coincidencia:
+            razon = f"Ningún código del archivo ({', '.join(posibles_codigos)}) se encontró en el Excel"
+
+        # ➤ Filtrar años (2020–2039)
+        matches = [m for m in matches if not re.fullmatch(r"20[2-3]\d", m)]
+
+        # ➤ Limpiar duplicados
+        matches = list(dict.fromkeys(matches))
+
+
+        # 3️⃣ Normaliza y elimina duplicados
+        posibles_codigos = []
+        for m in matches:
+            nm = _norm_invoice_code(m)
+            if nm and nm not in posibles_codigos:
+                posibles_codigos.append(nm)
+
+        # 4️⃣ Buscar coincidencias con el Excel (dos pasadas)
+        coincidencias_encontradas = []
+        razon = "No se detectó ningún código en el nombre del archivo"
+
+        # ➤ Primera pasada: códigos principales normalizados
+        for code in posibles_codigos:
+            code_norm = _norm_invoice_code(code)
+            if code_norm in excel_index:
+                coincidencias_encontradas.append({
+                    "code": code,
+                    "coincidencia": excel_index[code_norm],
+                    "origen": "primaria",
+                })
+
+        # ➤ Segunda pasada: bloques genéricos (solo si no estaban ya)
+        extra_blocks = re.findall(r"[A-Z0-9]{4,}", nombre.upper())
+        for eb in extra_blocks:
+            eb_norm = _norm_invoice_code(eb)
+            if eb_norm in excel_index and all(
+                eb_norm != _norm_invoice_code(c["code"]) for c in coincidencias_encontradas
+            ):
+                coincidencias_encontradas.append({
+                    "code": eb,
+                    "coincidencia": excel_index[eb_norm],
+                    "origen": "secundaria",
+                })
+
+        # 🟨 3️⃣ Tercera vía: rescate numérico puro — solo si NO hay coincidencias hasta ahora
+        if not coincidencias_encontradas:
+            numeric_blocks = re.findall(r"\d{4,}", nombre)
+            for nb in numeric_blocks:
+                # Ignorar años comunes
+                if nb in {"2020","2021","2022","2023","2024","2025","2026"}:
+                    continue
+                if nb in excel_index:
+                    coincidencias_encontradas.append({
+                        "code": nb,
+                        "coincidencia": excel_index[nb],
+                        "origen": "terciaria",
+                    })
+
+        # 🟨 3️⃣ Tercera vía: rescate — busca bloques aislados por separadores
+        # 🟨 3️⃣ Tercera vía: rescate mejorado — separa letras y números contiguos
+        base_clean = re.sub(r"[^A-Z0-9]", " ", nombre.upper())
+
+        # Separa letras y números adyacentes (para evitar "84927TRAVI")
+        base_clean = re.sub(r"(?<=\d)(?=[A-Z])", " ", base_clean)
+        base_clean = re.sub(r"(?<=[A-Z])(?=\d)", " ", base_clean)
+
+        rescue_blocks = re.findall(r"\b[A-Z0-9]{4,}\b", base_clean)
+
+        for rb in rescue_blocks:
+            if rb in {"2020", "2021", "2022", "2023", "2024", "2025", "2026"}:
+                continue
+            rb_norm = _norm_invoice_code(rb)
+            if rb_norm in excel_index and all(
+                rb_norm != _norm_invoice_code(c["code"]) for c in coincidencias_encontradas
+            ):
+                coincidencias_encontradas.append({
+                    "code": rb,
+                    "coincidencia": excel_index[rb_norm],
+                    "origen": "terciaria",
+                })
+
+        # ➤ Evaluar resultado combinado
+        if coincidencias_encontradas:
+            coincidencia = coincidencias_encontradas[0]["coincidencia"]  # toma la primera para mostrar
+            encontrados = [
+                f"{c['code']} → fila {c['coincidencia']['fila']} ({c['origen']})"
+                for c in coincidencias_encontradas
+            ]
+            razon = " / ".join(
+                [f"'{c['code']}' coincide con celda (columna '{c['coincidencia']['columna']}', fila {c['coincidencia']['fila']}) → {c['coincidencia']['valor']}'" for c in coincidencias_encontradas]
+            )
+        else:
+            coincidencia = None
+            razon = f"Ningún código del archivo ({', '.join(posibles_codigos)}) se encontró en el Excel"
+
+            # 🟨 3️⃣ Tercera vía: búsqueda separada SOLO para los no coincidentes
+            # Genera nueva lista de matches numéricos (solo dígitos, 4 o más)
+            matches_tercera = re.findall(r"\d{4,}", nombre)
+
+            for mt in matches_tercera:
+                # Ignorar años típicos
+                if mt in {"2020","2021","2022","2023","2024","2025","2026"}:
+                    continue
+
+                # Coincidencia directa con el Excel (sin normalizar)
+                if mt in excel_index:
+                    coincidencia = excel_index[mt]
+                    razon = (
+                        f"'{mt}' (vía numérica pura) coincide con celda "
+                        f"(columna '{coincidencia['columna']}', fila {coincidencia['fila']}) → {coincidencia['valor']}"
+                    )
+                    break
+
+            # Si sigue sin coincidencia, actualizar razón final
+            if not coincidencia:
+                razon = (
+                    f"Ningún código del archivo ({', '.join(posibles_codigos + matches_tercera)}) "
+                    f"se encontró en el Excel"
+                )
+
+
+            # 🟨 3️⃣ Tercera vía: nueva búsqueda exclusiva para los no coincidentes
+            matches_tercera = re.findall(r"\d{4,}", nombre)
+            for mt in matches_tercera:
+                # Ignorar años típicos
+                if mt in {"2020","2021","2022","2023","2024","2025","2026"}:
+                    continue
+                # Coincidencia directa o contenida dentro de una clave normalizada
+                for key, info in excel_index.items():
+                    if mt == key or mt in key:
+                        coincidencia = info
+                        razon = (
+                            f"'{mt}' (vía numérica pura) coincide con celda "
+                            f"(columna '{info['columna']}', fila {info['fila']}) → {info['valor']}"
+                        )
+                        break
+
+
 
         resultados.append({
-            "Archivo": nombre,
+            "Archivo": f.filename,
             "CodigosDetectados": posibles_codigos,
             "Coincidencia": bool(coincidencia),
             "Razon": razon,
         })
 
     # 5️⃣ Preparar preview
-    coincidencias = [
-        f"{r['Archivo']} → {r['Razon']}"
-        for r in resultados
-        if r["Coincidencia"]
-    ]
-    faltantes = [
-        f"{r['Archivo']} → {r['Razon']}"
-        for r in resultados
-        if not r["Coincidencia"]
-    ]
-
     preview = {
         "Resumen": {
             "PDFsProcesados": len(resultados),
             "Coincidencias": len([r for r in resultados if r["Coincidencia"]]),
             "Faltantes": len([r for r in resultados if not r["Coincidencia"]]),
         },
-        # 👇 Solo dos columnas: Documento y CoincidenciaDetectada
         "Coincidencias": [
             {
                 "Documento": r["Archivo"],
                 "CoincidenciaDetectada": (
                     f"✅ {r['Razon'].split(')')[0] + ')'}"
-
                     if r["Coincidencia"]
                     else "—"
                 ),
@@ -647,7 +796,6 @@ async def contraste_facturas(
             for r in resultados
             if r["Coincidencia"]
         ],
-        # 👇 Faltantes simplificados
         "Faltantes": [
             f"⚠️ {r['Archivo']} → {r['Razon']}"
             for r in resultados
@@ -660,6 +808,7 @@ async def contraste_facturas(
         media_type="application/json",
         headers={"X-Preview": json.dumps(preview, ensure_ascii=True)},
     )
+
 
 
 @app.post("/api/bankflowpro")
