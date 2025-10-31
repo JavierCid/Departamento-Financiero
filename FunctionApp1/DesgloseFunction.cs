@@ -10,7 +10,7 @@ public class DesgloseFunction
 {
     [Function("pdf2excel")]
     public async Task<HttpResponseData> Run(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", "options", Route = "pdf2excel")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", "options")] HttpRequestData req)
     {
         if (req.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
         {
@@ -26,17 +26,24 @@ public class DesgloseFunction
                                 ? (v.FirstOrDefault() ?? "archivo.xlsx")
                                 : "archivo.xlsx";
 
-            // Leer body a memoria
-            using var ms = new MemoryStream();
-            await req.Body.CopyToAsync(ms);
-            if (ms.Length == 0) return await Bad(req, "El archivo está vacío.");
+            // Leer PDF desde multipart/form-data
+            if (!req.Headers.Contains("Content-Type") || !req.Headers.GetValues("Content-Type").First().StartsWith("multipart/form-data"))
+                return await Bad(req, "Se esperaba un formulario multipart con un archivo PDF.");
 
-            // Validar firma ZIP (PK) de .xlsx
-            ms.Position = 0;
-            var hdr = new byte[2];
-            _ = ms.Read(hdr, 0, 2);
-            if (hdr[0] != 0x50 || hdr[1] != 0x4B) return await Bad(req, "No parece un .xlsx (firma ZIP incorrecta).");
-            ms.Position = 0;
+            var boundary = req.Headers.GetValues("Content-Type").First().Split("boundary=")[1];
+            var reader = new StreamReader(req.Body);
+            var body = await reader.ReadToEndAsync();
+
+            var startIndex = body.IndexOf("PDF");
+            if (startIndex < 0)
+                return await Bad(req, "No se detectó contenido PDF válido.");
+
+            byte[] fileBytes = System.Text.Encoding.UTF8.GetBytes(body.Substring(startIndex));
+            using var ms = new MemoryStream(fileBytes);
+            if (ms.Length == 0) return await Bad(req, "El archivo PDF está vacío.");
+
+            // (A partir de aquí, podrías procesar el PDF o reenviarlo a tu servicio Python)
+
 
             // ================= LÓGICA DE DESGLOSE =================
             using var wb = new XLWorkbook(ms);

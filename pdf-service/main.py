@@ -441,6 +441,225 @@ async def pdf2excel(file: List[UploadFile] = File(...)):
 # =========================
 # Endpoint BankFlow Pro
 # =========================
+# (…tu endpoint /api/bankflowpro tal y como lo tienes…)
+
+# =========================
+# Endpoint: Contraste facturas (PDFs) vs Pendientes (Excel)
+# =========================
+from fastapi import UploadFile
+import re
+
+def _norm_invoice_code(s: str | None) -> str:
+    """
+    Normaliza códigos de factura para detectar coincidencias flexibles:
+    24-25/MA//1391 ↔ MA1391, 3020014885 ↔ 3020014885, etc.
+    """
+    if not s:
+        return ""
+
+    import re
+    t = str(s).upper().strip()
+
+    # Limpieza
+    t = re.sub(r"\b(FACTURA|FAC|N[ºO]?|INVOICE|NO|NUMERO|NÚMERO|DOC|DOCUMENTO|S/FRA\.?)\b", "", t)
+    t = re.sub(r"[^\w]", " ", t)  # todo lo que no sea letra o número → espacio
+
+    # 🔹 Detecta “MA 1391”, “MA1391”, “24 25 MA 1391”, “24 MA 1391”, “MA-1391A”, etc.
+    m = re.search(r"\bMA\s*\d{2,6}[A-Z]?\b", t)
+    if m:
+        return m.group(0).replace(" ", "")
+
+    # 🔹 Detecta cualquier bloque “letras + números”
+    m2 = re.search(r"\b([A-Z]{1,5})\s*(\d{2,6})\b", t)
+    if m2:
+        return f"{m2.group(1)}{m2.group(2)}"
+
+    # 🔹 Detecta solo números largos
+    nums = re.findall(r"\d{5,}", t)
+    if nums:
+        return "".join(nums)
+
+    return re.sub(r"[^A-Z0-9]", "", t)
+
+def _pick_invoice_columns(df: pd.DataFrame) -> list[str]:
+    """
+    Detecta columnas que probablemente contengan números de factura:
+    Ej: 'S/Fra. Número', 'Factura nº', 'Invoice', etc.
+    """
+    import re
+    candidates = [
+        "factura", "fra", "invoice", "nº", "numero", "número", "ref", "referenc", "doc"
+    ]
+    cols = []
+
+    # 1️⃣ Detección por nombre de columna (regex flexible)
+    pattern = re.compile("|".join(candidates), re.IGNORECASE)
+    for c in df.columns:
+        if pattern.search(str(c)):
+            cols.append(c)
+
+    # 2️⃣ Si no encuentra por nombre, buscar por patrón en los valores
+    if not cols:
+        pattern_val = re.compile(r"\b\d{4,}([\/\-\s]?\d{3,})?\b")  # 3020014885 o 2025/137090
+        for c in df.columns:
+            series = df[c].astype(str).fillna("").head(60)
+            hits = sum(bool(pattern_val.search(v)) for v in series)
+            if hits / max(1, len(series)) > 0.25:
+                cols.append(c)
+
+    return cols[:3]
+
+def _pick_amount_columns(df: pd.DataFrame) -> list[str]:
+    cand = ["importe", "total", "bruto", "base", "a pagar", "amount", "total factura", "total euros"]
+    cols = []
+    for c in df.columns:
+        name = str(c).lower()
+        if any(k in name for k in cand):
+            cols.append(c)
+    return cols[:4]
+
+def _first_amount_in_row(row: pd.Series, cols: list[str]) -> float | None:
+    for c in cols:
+        v = row.get(c, None)
+        n = _to_float_eu(v) if v is not None else None
+        if n is not None:
+            return n
+    return None
+
+
+@app.post("/api/contraste-facturas")
+async def contraste_facturas(
+    pendientes: UploadFile = File(...),
+    facturas: List[UploadFile] = File(...),
+):
+    import re
+
+    # 1️⃣ Leer Excel
+    try:
+        pend_df = _read_tabular(pendientes)
+        pend_df = _norm_colnames(pend_df)
+    except Exception as e:
+        return Response(
+            content=f"Error leyendo pendientes: {e}",
+            media_type="text/plain",
+            status_code=400,
+        )
+
+    # 2️⃣ Detectar columnas relevantes
+    inv_cols = _pick_invoice_columns(pend_df)
+    amt_cols = _pick_amount_columns(pend_df)
+
+    if not inv_cols:
+        return Response(
+            content="No se detectaron columnas de Nº de factura en el Excel de pendientes.",
+            media_type="text/plain",
+            status_code=400,
+        )
+
+    # 3️⃣ Construir índice de facturas en Excel (busca en TODAS las columnas)
+    excel_index: dict[str, dict] = {}
+    for idx, row in pend_df.iterrows():
+        for col in pend_df.columns:
+            val = str(row.get(col, "") or "")
+            if not val.strip():
+                continue
+            val_norm = _norm_invoice_code(val)
+            if not val_norm:
+                continue
+            excel_index[val_norm] = {
+                "fila": idx + 2,
+                "columna": col,
+                "valor": val,
+            }
+
+    # 4️⃣ Procesar los PDFs SOLO por nombre de archivo
+    resultados = []
+    for f in facturas:
+        if not f.filename.lower().endswith(".pdf"):
+            return Response(
+                content=f"'{f.filename}' no es un PDF",
+                media_type="text/plain",
+                status_code=400,
+            )
+        nombre = f.filename
+        # Detectar posibles códigos de factura dentro del nombre del archivo (más inteligente)
+        # Incluye combinaciones con letras y prioriza el más largo
+        matches = re.findall(
+            r"(INV\d{3,}|\d{8,}|\d{4}[-_/]\d{3,}|\b[A-Z]{2,}\d{2,}\b|\b\d{2,}[A-Z]{2,}\b)",
+            nombre.upper()
+        )
+        # Priorizar el más largo (normalmente el número de factura real)
+        posibles_codigos = sorted(matches, key=len, reverse=True)
+
+
+        coincidencia = None
+        razon = "No se detectó ningún código en el nombre del archivo"
+        if posibles_codigos:
+            for code in posibles_codigos:
+                code_norm = _norm_invoice_code(code)
+                if code_norm in excel_index:
+                    coincidencia = excel_index[code_norm]
+                    razon = (
+                        f"'{code}' del archivo coincide con "
+                        f"celda (columna '{coincidencia['columna']}', fila {coincidencia['fila']}) → {coincidencia['valor']}"
+                    )
+
+                    break
+            else:
+                razon = f"Ningún código del archivo ({', '.join(posibles_codigos)}) se encontró en el Excel"
+
+        resultados.append({
+            "Archivo": nombre,
+            "CodigosDetectados": posibles_codigos,
+            "Coincidencia": bool(coincidencia),
+            "Razon": razon,
+        })
+
+    # 5️⃣ Preparar preview
+    coincidencias = [
+        f"{r['Archivo']} → {r['Razon']}"
+        for r in resultados
+        if r["Coincidencia"]
+    ]
+    faltantes = [
+        f"{r['Archivo']} → {r['Razon']}"
+        for r in resultados
+        if not r["Coincidencia"]
+    ]
+
+    preview = {
+        "Resumen": {
+            "PDFsProcesados": len(resultados),
+            "Coincidencias": len([r for r in resultados if r["Coincidencia"]]),
+            "Faltantes": len([r for r in resultados if not r["Coincidencia"]]),
+        },
+        # 👇 Solo dos columnas: Documento y CoincidenciaDetectada
+        "Coincidencias": [
+            {
+                "Documento": r["Archivo"],
+                "CoincidenciaDetectada": (
+                    f"✅ {r['Razon'].split(')')[0] + ')'}"
+
+                    if r["Coincidencia"]
+                    else "—"
+                ),
+            }
+            for r in resultados
+            if r["Coincidencia"]
+        ],
+        # 👇 Faltantes simplificados
+        "Faltantes": [
+            f"⚠️ {r['Archivo']} → {r['Razon']}"
+            for r in resultados
+            if not r["Coincidencia"]
+        ],
+    }
+
+    return Response(
+        content=json.dumps(preview, ensure_ascii=False, indent=2),
+        media_type="application/json",
+        headers={"X-Preview": json.dumps(preview, ensure_ascii=True)},
+    )
 
 
 @app.post("/api/bankflowpro")
@@ -668,9 +887,8 @@ async def bankflowpro(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers=headers
     )
-# =========================
-# Lanzador local
-# =========================
+
+
 if __name__ == "__main__":
     import uvicorn
     print("✅ FastAPI corriendo en http://127.0.0.1:8010")

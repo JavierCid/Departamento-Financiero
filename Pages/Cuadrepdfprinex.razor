@@ -1,0 +1,242 @@
+﻿@page "/Cuadrepdfprinex"
+@using Microsoft.AspNetCore.Components.Forms
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<div class="page-Cuadrepdfprinex">
+    <div class="prinex-head">
+        <h3>Cuadre PDFs ↔ Prinex</h3>
+        <img class="prinex-logo" src="/Images/prinex_logo.png" alt="Prinex" />
+    </div>
+
+    <div class="prinex-desc">
+        Compara las facturas PDF con el Excel de facturas pendientes de Prinex para detectar coincidencias y diferencias.
+    </div>
+
+    <div class="df-uploader">
+        <div class="df-filepick">
+            <button type="button" class="btn btn-ghost df-filebtn">Seleccionar facturas (PDF)</button>
+            <InputFile OnChange="OnPdfsSelected" multiple accept=".pdf" />
+        </div>
+
+        <div class="df-filepick">
+            <button type="button" class="btn btn-ghost df-filebtn">Seleccionar Excel Prinex</button>
+            <InputFile OnChange="OnExcelSelected" accept=".xlsx,.xls" />
+        </div>
+
+        <button class="btn btn-primary" @onclick="Enviar" disabled="@(!_canSend || _busy)">
+            @(_busy ? "Procesando..." : "Procesar")
+        </button>
+    </div>
+
+    @if (_pdfs.Count > 0 || _excel is not null)
+    {
+        <div class="df-files small text-muted mt-2">
+            <div>PDFs: @_pdfs.Count archivo(s)</div>
+            @if (_excel is not null)
+            {
+                <div>Excel: @_excel.Name</div>
+            }
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_err))
+    {
+        <div class="alert alert-danger py-2 mt-3">@_err</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_ok))
+    {
+        <div class="alert alert-success py-2 mt-3">@_ok</div>
+    }
+
+    @if (_preview is not null)
+    {
+        <div class="df-preview card df-card p-3 mt-3">
+            <h5 class="mb-3">Vista previa del cruce</h5>
+
+            @if (_preview.Coincidencias?.Count > 0)
+            {
+                <h6>✅ Coincidencias (@_preview.Coincidencias.Count)</h6>
+                <table class="table table-sm table-striped table-hover">
+                    <thead class="table-primary">
+                        <tr>
+                            <th>Documento</th>
+                            <th>Coincidencia detectada</th>
+
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var f in _preview.Coincidencias)
+                        {
+                            <tr>
+                                <td>@f.Documento</td>
+                                <td class="small text-muted" title="@f.CoincidenciaDetectada">
+                                    @f.CoincidenciaDetectada
+                                </td>
+
+
+                            </tr>
+                        }
+                    </tbody>
+
+                </table>
+            }
+
+            @if (_preview.Faltantes?.Count > 0)
+            {
+                <h6 class="mt-3 text-warning">⚠️ Faltantes en Prinex (@_preview.Faltantes.Count)</h6>
+                <ul>
+                    @foreach (var f in _preview.Faltantes)
+                    {
+                        <li>@f</li>
+                    }
+                </ul>
+            }
+
+            @if (_preview.Descuadres?.Count > 0)
+            {
+                <h6 class="mt-3 text-danger">❌ Importe incorrecto (@_preview.Descuadres.Count)</h6>
+                <ul>
+                    @foreach (var f in _preview.Descuadres)
+                    {
+                        <li>@f</li>
+                    }
+                </ul>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    const string EndpointCuadre = "http://127.0.0.1:8010/api/contraste-facturas";
+
+
+
+    List<IBrowserFile> _pdfs = new();
+    IBrowserFile? _excel;
+    bool _busy;
+    string? _ok, _err;
+    PreviewDto? _preview;
+
+    bool _canSend => _pdfs.Count > 0 && _excel is not null;
+
+    void OnPdfsSelected(InputFileChangeEventArgs e)
+    {
+        _pdfs = e.GetMultipleFiles().ToList();
+        _ok = _err = null;
+        _preview = null;
+    }
+
+    void OnExcelSelected(InputFileChangeEventArgs e)
+    {
+        _excel = e.File;
+        _ok = _err = null;
+        _preview = null;
+    }
+
+    async Task Enviar()
+    {
+        if (!_canSend) return;
+        _busy = true; _ok = _err = null; _preview = null;
+
+        try
+        {
+            using var form = new MultipartFormDataContent();
+
+            foreach (var pdf in _pdfs)
+            {
+                using var ms = new MemoryStream();
+                await pdf.OpenReadStream(long.MaxValue).CopyToAsync(ms);
+                var bytes = new ByteArrayContent(ms.ToArray());
+                bytes.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+                form.Add(bytes, "facturas", pdf.Name);
+
+            }
+
+            if (_excel is not null)
+            {
+                using var ms = new MemoryStream();
+                await _excel.OpenReadStream(long.MaxValue).CopyToAsync(ms);
+                var bytes = new ByteArrayContent(ms.ToArray());
+                bytes.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+                form.Add(bytes, "pendientes", _excel.Name);
+
+            }
+
+            var resp = await Http.PostAsync(EndpointCuadre, form);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _err = $"Error {(int)resp.StatusCode}: " + await resp.Content.ReadAsStringAsync();
+                return;
+            }
+
+            if (resp.Headers.TryGetValues("X-Preview", out var vals))
+            {
+                var json = vals.FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(json))
+                    _preview = System.Text.Json.JsonSerializer.Deserialize<PreviewDto>(json);
+            }
+
+            _ok = "Cruce completado correctamente";
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally { _busy = false; }
+    }
+
+    // === DTO ===
+    public class PreviewDto
+    {
+        public List<Coincidencia> Coincidencias { get; set; } = new();
+        public List<string> Faltantes { get; set; } = new();
+        public List<string> Descuadres { get; set; } = new();
+
+        public class Coincidencia
+        {
+            public string? Documento { get; set; }
+            public string? CoincidenciaDetectada { get; set; }
+        }
+
+
+    }
+}
+<style>
+    .page-Cuadrepdfprinex .table {
+        table-layout: fixed; /* 🔹 fija el ancho total */
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+        .page-Cuadrepdfprinex .table th,
+        .page-Cuadrepdfprinex .table td {
+            padding: 0.35rem 0.45rem; /* 🔹 reduce separación */
+            vertical-align: middle;
+        }
+
+    .page-Cuadrepdfprinex th:nth-child(1),
+    .page-Cuadrepdfprinex td:nth-child(1) {
+        width: 45%; /* 🔹 columna Documento */
+    }
+
+    .page-Cuadrepdfprinex th:nth-child(2),
+    .page-Cuadrepdfprinex td:nth-child(2) {
+        width: 55%; /* 🔹 columna Coincidencia */
+    }
+
+    .page-Cuadrepdfprinex td.text-muted {
+        white-space: normal;
+        word-break: break-word;
+        color: #f3f4f6; /* 🔹 más claro */
+        font-size: 0.9rem; /* 🔹 más legible */
+        line-height: 1.2;
+        font-weight: 500;
+    }
+
+    .page-Cuadrepdfprinex th {
+        font-weight: 700;
+        color: #fff;
+        background: #243b55;
+    }
+</style>
