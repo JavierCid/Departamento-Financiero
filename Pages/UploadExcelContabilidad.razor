@@ -1,0 +1,258 @@
+﻿@page "/uploadexcel-contabilidad"
+
+
+@using System.Net.Http.Headers
+@using System.Text.Json
+@using System.Globalization
+@using Microsoft.AspNetCore.Components.Forms
+
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<div class="prinex-head">
+    <h3>Contraste contabilidad ↔ Prinex</h3>
+
+
+    <img class="prinex-logo" src="/Images/prinex_logo.png" alt="Prinex" />
+</div>
+
+<div class="prinex-desc">
+    Cruza los datos de facturación de Prinex con los importes registrados en el libro mayor
+</div>
+<!-- Uploader unificado (mismo look que Procesar facturas) -->
+<div class="df-uploader">
+    <div class="df-filepick">
+        <button type="button" class="btn btn-ghost df-filebtn">Seleccionar archivo (Excel)</button>
+        <InputFile OnChange="OnFileSelected" accept=".xlsx,.xls" />
+    </div>
+
+    <button class="btn btn-primary" @onclick="Procesar" disabled="@(!_canSend || _busy)">
+        @(_busy ? "Procesando..." : "Procesar")
+    </button>
+</div>
+
+<!-- Dropzone elegante (look BankFlow Pro) -->
+<div class="@($"df-drop df-drop--hero{(_drag ? " drag" : "")}")"
+     @ondragover:preventDefault
+     @ondragenter="() => SetDrag(true)"
+     @ondragleave="() => SetDrag(false)"
+     @ondrop="() => SetDrag(false)">
+
+    <InputFile class="df-drop__input" OnChange="OnFileSelected" accept=".xlsx,.xls,.csv" />
+
+    <div class="df-drop__icon"><i class="bi bi-file-earmark-spreadsheet"></i></div>
+
+    <div class="df-drop__title">Arrastra aquí tu archivo</div>
+    <div class="df-drop__hint">…o usa “Seleccionar archivo (Excel)”</div>
+</div>
+
+<!-- Nombre del archivo seleccionado -->
+@if (_selectedFile is not null)
+{
+    <div class="df-files">
+        <div class="item">@_selectedFile.Name</div>
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(_success))
+{
+    <div class="alert alert-success mt-2">@_success</div>
+}
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger mt-2">@_error</div>
+}
+
+@if (_preview is not null)
+{
+    <div class="df-preview card df-card p-3 mt-3">
+        <h5 class="mb-3">Resumen de comparación</h5>
+
+        <h6 class="mb-2">Faltantes (@(_preview.Faltantes?.Count ?? 0))</h6>
+        <table class="table table-sm table-striped table-hover" style="font-size:.85rem">
+
+            <thead>
+                <tr>
+                    <th style="width:40%">Nº Factura</th>
+                    <th style="width:60%">Importe PRINEX</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var f in _preview.Faltantes ?? new())
+                {
+                    <tr>
+                        <td>@f.Factura</td>
+                        <td>@ToEuro(f.Importe)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <h6 class="mt-3 mb-2">Descuadres (@(_preview.Descuadres?.Count ?? 0))</h6>
+        <table class="table table-sm table-striped table-hover" style="font-size:.85rem">
+            <thead>
+                <tr>
+                    <th style="width:25%">Nº Factura</th>
+                    <th style="width:25%">Importe PRINEX</th>
+                    <th style="width:25%">Haber MAYORES</th>
+                    <th style="width:25%">Diferencia</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var d in _preview.Descuadres ?? new())
+                {
+                    <tr>
+                        <td>@d.Factura</td>
+                        <td>@ToEuro(d.ImportePrinex)</td>
+                        <td>@ToEuro(d.ImporteMayores)</td>
+                        <td class="neg">@ToEuro(d.Diferencia)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <div class="text-muted small">Mostrando @((_preview.Faltantes?.Count ?? 0) + (_preview.Descuadres?.Count ?? 0)) elementos.</div>
+    </div>
+}
+
+@code {
+    // ---- Estado ----
+    IBrowserFile? _selectedFile;
+    bool _busy;
+    bool _drag = false;
+    bool _canSend => _selectedFile is not null;
+
+    string? _success;
+    string? _error;
+    PreviewDto? _preview;
+
+    // ---- Drag & Drop ----
+    void HandleDragOver(DragEventArgs e)
+    {
+        _ = e.DataTransfer; // fuerza acceso
+    }
+
+    void SetDrag(bool v) => _drag = v;
+
+    // ---- Selección ----
+    void OnFileSelected(InputFileChangeEventArgs e)
+    {
+        _selectedFile = e.File;
+        _success = _error = null;
+        _preview = null;
+    }
+
+    // ---- Envío ----
+    async Task Procesar()
+    {
+        if (_selectedFile is null) return;
+
+        _busy = true; _success = _error = null; _preview = null;
+
+        try
+        {
+            using var ms = new MemoryStream();
+            await _selectedFile.OpenReadStream(maxAllowedSize: 20 * 1024 * 1024).CopyToAsync(ms);
+            var bytes = ms.ToArray();
+
+            using var content = new ByteArrayContent(bytes);
+            content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            content.Headers.Add("X-File-Name", _selectedFile.Name);
+
+            const string apiUrl = "https://dffinanciero-func-jcid.azurewebsites.net/api/ProcesarExcel";
+
+            var resp = await Http.PostAsync(apiUrl, content);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                _error = await resp.Content.ReadAsStringAsync();
+                if (string.IsNullOrWhiteSpace(_error)) _error = "Error al procesar el archivo.";
+                return;
+            }
+
+            var outBytes = await resp.Content.ReadAsByteArrayAsync();
+            var outName = GetFileNameFromContentDisposition(resp) ?? "Comparacion.xlsx";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", outName, Convert.ToBase64String(outBytes));
+
+            _success = "Archivo procesado correctamente.";
+
+            // Vista previa opcional vía cabecera X-Preview
+            if (resp.Headers.TryGetValues("X-Preview", out var values))
+            {
+                var json = values.FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(json))
+                {
+                    _preview = JsonSerializer.Deserialize<PreviewDto>(
+                        json,
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                    );
+                }
+            }
+        }
+        catch
+        {
+            _error = "Error al procesar el archivo.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // ---- Helpers ----
+    static string ToEuro(double v) => v.ToString("C", new CultureInfo("es-ES"));
+
+    static string? GetFileNameFromContentDisposition(HttpResponseMessage resp)
+    {
+        if (!resp.Content.Headers.TryGetValues("Content-Disposition", out var vals)) return null;
+        var cd = vals.FirstOrDefault() ?? "";
+
+        var starIdx = cd.IndexOf("filename*=", StringComparison.OrdinalIgnoreCase);
+        if (starIdx >= 0)
+        {
+            var part = cd.Substring(starIdx + 10).Trim().Trim(';').Trim();
+            var pos = part.IndexOf("''", StringComparison.Ordinal);
+            if (pos > 0)
+            {
+                var enc = part.Substring(pos + 2).Trim('"');
+                return Uri.UnescapeDataString(enc);
+            }
+        }
+
+        var fnIdx = cd.IndexOf("filename=", StringComparison.OrdinalIgnoreCase);
+        if (fnIdx >= 0)
+        {
+            var part = cd.Substring(fnIdx + 9).Trim().Trim(';').Trim().Trim('"');
+            return part;
+        }
+        return null;
+    }
+
+    // ---- DTOs ----
+    private class PreviewDto
+    {
+        public List<Faltante>? Faltantes { get; set; }
+        public List<Descuadre>? Descuadres { get; set; }
+    }
+
+    private class Faltante
+    {
+        public string Factura { get; set; } = "";
+        public double Importe { get; set; }
+    }
+
+    private class Descuadre
+    {
+        public string Factura { get; set; } = "";
+        public double ImportePrinex { get; set; }
+        public double ImporteMayores { get; set; }
+        public double Diferencia { get; set; }
+    }
+}
+
+<style>
+    .neg {
+        color: #b00000;
+        font-weight: 600;
+    }
+</style>

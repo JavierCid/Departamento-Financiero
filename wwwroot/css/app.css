@@ -173,6 +173,21 @@ body {
     display: flex;
     gap: 12px
 }
+/* ====== Icono del encabezado ====== */
+.df-hero__icon {
+    width: 120px;
+    height: 120px;
+    color: #6d9dfc; /* 🔹 Mismo azul que los íconos inferiores */
+    filter: drop-shadow(0 0 6px rgba(109, 157, 252, 0.25));
+    opacity: 0.9;
+    transition: transform 0.3s ease, filter 0.3s ease;
+}
+
+    .df-hero__icon:hover {
+        transform: scale(1.05);
+        filter: drop-shadow(0 0 10px rgba(109, 157, 252, 0.4));
+        opacity: 1;
+    }
 
 /* ====== Botones ====== */
 .btn-primary, .btn-ghost {
@@ -584,10 +599,10 @@ body {
     background-repeat: no-repeat;
     background-position: center;
     background-size: contain;
-    opacity: 0.75; /* más visible */
-    filter: contrast(1.5) brightness() saturate(0.9);
+    opacity: 1; /* más visible */
     pointer-events: none;
     z-index: 2;
+    filter: drop-shadow(3px 3px 3px rgb(12, 19, 50)) brightness(0.7) saturate(1.1) contrast(1.4);
 }
 
 
@@ -829,7 +844,7 @@ table.table tbody td {
     width: 210px !important;
     height: auto !important;
     object-fit: contain;
-    filter: drop-shadow(0 3px 6px rgba(0,0,0,.4)) brightness(0.8) contrast(1.5);
+    filter: drop-shadow(0 0 2px rgba(140, 190, 255, 0.1)) brightness(1.15) saturate(1.1);
     pointer-events: none;
     user-select: none;
 }
@@ -865,7 +880,7 @@ table.table tbody td {
     width: 270px !important; /* tamaño “grande” (como Prinex) */
     height: auto !important;
     object-fit: contain;
-    filter: drop-shadow(0 3px 6px rgba(0,0,0,.4)) brightness(0.95) contrast(1.25);
+    filter: drop-shadow(0 0 2px rgba(140, 190, 255, 0.1)) brightness(1.15) saturate(1.1);
     pointer-events: none;
     user-select: none;
 }
@@ -898,7 +913,7 @@ table.table tbody td {
     width: 195px !important;
     height: auto !important;
     object-fit: contain;
-    filter: drop-shadow(0 3px 6px rgba(0,0,0,.4)) brightness(1) contrast(1);
+    filter: drop-shadow(0 0 2px rgba(140, 190, 255, 0.1)) brightness(1.15) saturate(1.1);
     pointer-events: none;
     user-select: none;
 }
