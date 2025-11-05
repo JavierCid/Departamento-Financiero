@@ -26,9 +26,25 @@
         <InputFile OnChange="OnFileSelected" accept=".xlsx,.xls" />
     </div>
 
+    <div class="df-periodo">
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+            <div class="input-group input-group-sm" style="width: 140px;">
+                <span class="input-group-text bg-secondary text-white">Mes</span>
+                <input type="number" min="1" max="12" @bind="_mes" class="form-control text-center" />
+            </div>
+
+            <div class="input-group input-group-sm" style="width: 160px;">
+                <span class="input-group-text bg-secondary text-white">Año</span>
+                <input type="number" min="2000" max="2100" @bind="_anio" class="form-control text-center" />
+            </div>
+        </div>
+
+    </div>
+
     <button class="btn btn-primary" @onclick="Procesar" disabled="@(!_canSend || _busy)">
         @(_busy ? "Procesando..." : "Procesar")
     </button>
+
 </div>
 
 <!-- Dropzone elegante (look BankFlow Pro) -->
@@ -110,8 +126,33 @@
                 }
             </tbody>
         </table>
+        @if (_preview?.FaltantesInverso is not null)
 
-        <div class="text-muted small">Mostrando @((_preview.Faltantes?.Count ?? 0) + (_preview.Descuadres?.Count ?? 0)) elementos.</div>
+        {
+            <h6 class="mt-3 mb-2">En Mayores y no en Prinex (@_preview.FaltantesInverso.Count)</h6>
+            <table class="table table-sm table-striped table-hover" style="font-size:.85rem">
+                <thead>
+                    <tr>
+                        <th style="width:40%">Nº Factura</th>
+                        <th style="width:60%">Importe MAYORES</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var f in _preview.FaltantesInverso)
+                    {
+                        <tr>
+                            <td>@f.Factura</td>
+                            <td>@ToEuro(f.Importe)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+
+        <div class="text-muted small">
+            Mostrando @((_preview.Faltantes?.Count ?? 0) + (_preview.Descuadres?.Count ?? 0) + (_preview.FaltantesInverso?.Count ?? 0)) elementos.
+        </div>
     </div>
 }
 
@@ -119,6 +160,9 @@
     // ---- Estado ----
     IBrowserFile? _selectedFile;
     bool _busy;
+    int _mes = DateTime.Now.Month;
+    int _anio = DateTime.Now.Year;
+
     bool _drag = false;
     bool _canSend => _selectedFile is not null;
 
@@ -159,9 +203,11 @@
             content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
             content.Headers.Add("X-File-Name", _selectedFile.Name);
 
-            const string apiUrl = "https://dffinanciero-func-jcid.azurewebsites.net/api/ProcesarExcel";
+            string apiUrl = $"http://localhost:7127/api/ProcesarExcel?mes={_mes}&anio={_anio}";
+
 
             var resp = await Http.PostAsync(apiUrl, content);
+
 
             if (!resp.IsSuccessStatusCode)
             {
@@ -233,9 +279,16 @@
     {
         public List<Faltante>? Faltantes { get; set; }
         public List<Descuadre>? Descuadres { get; set; }
+        public List<FaltanteInv>? FaltantesInverso { get; set; }
+
     }
 
     private class Faltante
+    {
+        public string Factura { get; set; } = "";
+        public double Importe { get; set; }
+    }
+    private class FaltanteInv
     {
         public string Factura { get; set; } = "";
         public double Importe { get; set; }

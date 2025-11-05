@@ -602,7 +602,7 @@ body {
     opacity: 1; /* más visible */
     pointer-events: none;
     z-index: 2;
-    filter: drop-shadow(3px 3px 3px rgb(12, 19, 50)) brightness(0.7) saturate(1.1) contrast(1.4);
+    filter: invert(42%) sepia(98%) saturate(4800%) hue-rotate(180deg) brightness(105%) contrast(103%);
 }
 
 

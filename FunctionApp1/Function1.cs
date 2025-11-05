@@ -24,7 +24,9 @@ namespace FunctionApp1
             public string? Periodo { get; set; } // yyyy-MM
             public List<Faltante> Faltantes { get; set; } = new();
             public List<Descuadre> Descuadres { get; set; } = new();
+            public List<Faltante> FaltantesInverso { get; set; } = new(); // ⬅️ NUEVO
         }
+
         private sealed class Faltante { public string Factura { get; set; } = ""; public decimal Importe { get; set; } }
         private sealed class Descuadre { public string Factura { get; set; } = ""; public decimal Prinex { get; set; } public decimal Mayores { get; set; } public decimal Diferencia { get; set; } }
 
@@ -61,6 +63,11 @@ namespace FunctionApp1
                     AddCors(bad, req);
                     return bad;
                 }
+
+                // 🔹 Leer mes y año desde querystring
+                var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+                int.TryParse(query.Get("mes"), out var mes);
+                int.TryParse(query.Get("anio"), out var anio);
 
                 // Nombre original (cabecera X-File-Name)
                 string fileName = "archivo.xlsx";
@@ -101,9 +108,13 @@ namespace FunctionApp1
                 }
                 ms.Position = 0;
 
-                var outBytes = await ProcesarComparacionAsync(ms, fileName);
+                var (outBytes, faltantesInverso) = await ProcesarComparacionAsync(ms, fileName, mes, anio);
+
+
 
                 var resp = req.CreateResponse(HttpStatusCode.OK);
+                resp.Headers.Add("X-Feature-Inverso", "on-2025-11-04");
+
                 resp.Headers.Add("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
                 var baseName = Path.GetFileNameWithoutExtension(fileName);
@@ -111,6 +122,7 @@ namespace FunctionApp1
                 var outName = $"Comparacion_{baseName}.xlsx";
                 resp.Headers.Add("Content-Disposition",
                     $"attachment; filename=\"{outName}\"; filename*=UTF-8''{Uri.EscapeDataString(outName)}");
+                resp.Headers.Add("X-Build", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
 
                 // Vista previa y descarga basadas en el Excel REAL ya generado por ProcesarComparacionAsync
                 using var outMs = new MemoryStream(outBytes, writable: false);
@@ -159,11 +171,22 @@ namespace FunctionApp1
                         }
                     }
 
-                    resp.Headers.Add("X-Preview", System.Text.Json.JsonSerializer.Serialize(new
+                    var preview = new PreviewDto
                     {
-                        Faltantes = faltantesList,
-                        Descuadres = descuadresList
-                    }));
+                        Faltantes = faltantesList.Select(x => new Faltante { Factura = (string)x.GetType().GetProperty("Factura")!.GetValue(x)!, Importe = Convert.ToDecimal(x.GetType().GetProperty("Importe")!.GetValue(x)) }).ToList(),
+                        Descuadres = descuadresList.Select(x => new Descuadre
+                        {
+                            Factura = (string)x.GetType().GetProperty("Factura")!.GetValue(x)!,
+                            Prinex = Convert.ToDecimal(x.GetType().GetProperty("ImportePrinex")!.GetValue(x)),
+                            Mayores = Convert.ToDecimal(x.GetType().GetProperty("ImporteMayores")!.GetValue(x)),
+                            Diferencia = Convert.ToDecimal(x.GetType().GetProperty("Diferencia")!.GetValue(x))
+                        }).ToList(),
+                        FaltantesInverso = faltantesInverso.Select(x => new Faltante { Factura = x.Factura, Importe = x.Importe }).ToList()
+                    };
+                    resp.Headers.Add("X-Preview", JsonSerializer.Serialize(preview));
+
+
+
                 }
 
                 // Enviar archivo + CORS y salir (usa directamente outBytes)
@@ -172,13 +195,6 @@ namespace FunctionApp1
                 return resp;
             }
 
-            catch (InvalidDataException badZip)
-            {
-                var bad = req.CreateResponse(HttpStatusCode.BadRequest);
-                await bad.WriteStringAsync($"Archivo ZIP inválido: {badZip.Message}");
-                AddCors(bad, req);
-                return bad;
-            }
             catch (Exception ex) when (
                 ex is FormatException ||
                 ex is InvalidOperationException ||
@@ -196,6 +212,7 @@ namespace FunctionApp1
                 AddCors(err, req);
                 return err;
             }
+
         }
 
         // CORS dinámico
@@ -221,7 +238,9 @@ namespace FunctionApp1
         private const int MIN_DIGITS = 8;
         private const int MAX_DIGITS = 999;
 
-        private async Task<byte[]> ProcesarComparacionAsync(Stream xlsxStream, string originalFileName)
+        private async Task<(byte[] Archivo, List<(string Factura, decimal Importe)> FaltantesInverso)> ProcesarComparacionAsync(Stream xlsxStream, string originalFileName, int mesFiltro, int anioFiltro)
+
+
         {
             xlsxStream.Position = 0;
 
@@ -287,7 +306,12 @@ namespace FunctionApp1
                 if (Math.Abs(haber) < 0.0000001m) continue;
 
                 var fechaM = wsMayores.Cell(r, cFechaM).Value;
-                if (haveYmd && !IsSameMonth(fechaM, yy, mm)) continue;
+                if (anioFiltro > 0 && mesFiltro > 0)
+                {
+                    if (!IsSameMonth(fechaM, anioFiltro, mesFiltro)) continue;
+                }
+                else if (haveYmd && !IsSameMonth(fechaM, yy, mm)) continue;
+
 
                 if (cSocMay > 0 && !CellContainsSociedad(wsMayores.Cell(r, cSocMay).Value, sociedadClave)) continue;
 
@@ -330,8 +354,8 @@ namespace FunctionApp1
                 string fase = NormalizePhase(wsSrc.Cell(r, cFase).Value);
                 if (!(fase == "VISADO PM" || fase == "CONTABILIZAR FACTURA")) continue;
 
-                var fechaS = wsSrc.Cell(r, cFechaFra).Value;
-                if (haveYmd && !IsSameMonth(fechaS, yy, mm)) continue;
+                
+
 
                 if (cSocSrc > 0 && !CellContainsSociedad(wsSrc.Cell(r, cSocSrc).Value, sociedadClave)) continue;
 
@@ -351,6 +375,21 @@ namespace FunctionApp1
                     dSrcDisp[mk] = MakeDisplayKey(token);
                 }
             }
+            // ====== Contraste inverso: facturas en MAYORES (41*, salvo 4109) no están en PRINEX ======
+            var faltantesInverso = new List<(string Factura, decimal Importe)>();
+
+            foreach (var kv in dMay)
+            {
+                var mk = kv.Key;
+                var importe = kv.Value;
+                if (!dSrc.ContainsKey(mk))
+                {
+                    // Mostrar el mismo display que arriba (documento o concepto)
+                    string disp = dMayDisp.TryGetValue(mk, out var v) ? v : mk;
+                    faltantesInverso.Add((disp, importe));
+                }
+            }
+
 
             // ====== Crear hoja de salida ======
             var wsOut = wb.Worksheets.FirstOrDefault(s => s.Name == "Comparación");
@@ -443,6 +482,21 @@ namespace FunctionApp1
             }
 
             int f2 = rowOut;
+            // ====== Bloque inverso ======
+            rowOut += 2;
+            wsOut.Cell(rowOut, 1).Value = "Facturas que SÍ están en contabilidad pero NO están en PRINEX";
+
+
+            rowOut++;
+            wsOut.Cell(rowOut, 1).Value = "Nº Factura";
+            wsOut.Cell(rowOut, 2).Value = "Importe MAYORES";
+
+            foreach (var item in faltantesInverso.OrderBy(i => i.Factura))
+            {
+                rowOut++;
+                wsOut.Cell(rowOut, 1).Value = item.Factura;
+                wsOut.Cell(rowOut, 2).Value = item.Importe;
+            }
 
             // Mensaje final (como la macro)
             int totalInc = faltantes + descuadres;
@@ -503,7 +557,8 @@ namespace FunctionApp1
             // Guardar y devolver
             using var outMs = new MemoryStream();
             wb.SaveAs(outMs);
-            return await Task.FromResult(outMs.ToArray());
+            return await Task.FromResult((outMs.ToArray(), faltantesInverso));
+
 
         }
 
@@ -535,9 +590,11 @@ namespace FunctionApp1
             // Secciones
             var rFalt = FindRowContains(ws, "NO están en MAYORES");
             var rDesc = FindRowContains(ws, "DESCUADRE");
+            var rInv = FindRowContains(ws, "contabilidad pero NO están en PRINEX"); // nueva sección inversa
 
             if (rFalt > 0) StyleSectionHeader(ws.Range($"A{rFalt}:D{rFalt}"), XLColor.FromArgb(228, 241, 228));
             if (rDesc > 0) StyleSectionHeader(ws.Range($"A{rDesc}:D{rDesc}"), XLColor.FromArgb(228, 241, 228));
+            if (rInv > 0) StyleSectionHeader(ws.Range($"A{rInv}:D{rInv}"), XLColor.FromArgb(228, 241, 228));
 
             // Cajas suaves: simulamos con bordes
             if (rFalt > 0)
@@ -558,6 +615,15 @@ namespace FunctionApp1
                     MakeSoftBox(ws, ws.Range($"A{rDesc}:D{dEnd}"));
                 StyleTableHeader(ws.Range($"A{rDesc + 1}:D{rDesc + 1}"));
                 ApplyZebra(ws, ws.Range($"A{dStart + 1}:D{dEnd}"));
+            }
+            if (rInv > 0)
+            {
+                int iStart = rInv + 1;
+                int iEnd = FindLastDataInTwoCols(ws, iStart + 1, 1, 2);
+                if (iEnd >= iStart)
+                    MakeSoftBox(ws, ws.Range($"A{rInv}:D{iEnd}"));
+                StyleTableHeader(ws.Range($"A{rInv + 1}:D{rInv + 1}"));
+                ApplyZebra(ws, ws.Range($"A{iStart + 1}:D{iEnd}"));
             }
 
             // Centrar columnas A
@@ -702,10 +768,28 @@ namespace FunctionApp1
             if (v is long l) return l;
 
             var s = Convert.ToString(v) ?? string.Empty;
-            s = s.Replace(" ", "").Replace(".", "").Replace(",", ".");
+            s = s.Trim();
+
+            // Detecta si la coma parece separador decimal
+            if (s.Contains(',') && s.LastIndexOf(',') > s.LastIndexOf('.'))
+            {
+                s = s.Replace(".", "").Replace(",", ".");
+            }
+            else
+            {
+                s = s.Replace(",", "");
+            }
+
             if (decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var res))
                 return res;
+
+            // Segundo intento: cultura española
+            if (decimal.TryParse(s, NumberStyles.Any, new CultureInfo("es-ES"), out res))
+                return res;
+
             return 0m;
+
+            
         }
 
         private static bool IsSameMonth(object dt, int y, int m)
