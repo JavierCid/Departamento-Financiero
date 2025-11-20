@@ -1,17 +1,19 @@
-using Departamento_Financiero;
+﻿using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
-using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 
-public partial class Program
-{
-    public static async Task Main(string[] args)
-    {
-        var builder = WebAssemblyHostBuilder.CreateDefault(args);
+var builder = WebApplication.CreateBuilder(args);
 
-        builder.RootComponents.Add<App>("#app");
-builder.RootComponents.Add<HeadOutlet>("head::after");
+builder.Services.AddRazorPages();
+builder.Services.AddServerSideBlazor();
 
-builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
-        await builder.Build().RunAsync();
-    }
-}
+var app = builder.Build();
+
+app.UseDeveloperExceptionPage();
+app.UseStaticFiles();
+
+app.UseRouting();
+
+app.MapBlazorHub();
+app.MapFallbackToPage("/_Host");
+
+app.Run();

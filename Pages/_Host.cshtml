@@ -1,25 +1,32 @@
+@page "/"
+@namespace Departamento_Financiero
+
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+@{
+    Layout = null;
+}
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Departamento Financiero</title>
+
     <base href="/" />
 
-    <!-- CSS: primero Bootstrap, luego tu app.css -->
     <link href="css/bootstrap/bootstrap.min.css" rel="stylesheet" />
     <link href="css/app.css" rel="stylesheet" />
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-
 </head>
-
 <body>
-    <div id="app">Cargando Departamento Financiero...</div>
+    <app>
+        <component type="typeof(Departamento_Financiero.App)" render-mode="Server" />
+    </app>
 
-    <!-- Blazor -->
-    <script src="_framework/blazor.webassembly.js"></script>
 
-    <!-- JS para descargas (añade el archivo en wwwroot/download.js) -->
+
+    <script src="_framework/blazor.server.js"></script>
     <script src="download.js"></script>
 </body>
 </html>

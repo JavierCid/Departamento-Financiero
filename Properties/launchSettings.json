@@ -7,31 +7,25 @@
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
       "dotnetRunMessages": true,
-      "inspectUri": "{wsProtocol}://{url.hostname}:{url.port}/_framework/debug/ws-proxy?browser={browserInspectUri}",
+      
       "applicationUrl": "http://localhost:7252"
     },
     "https": {
       "commandName": "Project",
-      "launchBrowser": true,
-      "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
-      },
-      "dotnetRunMessages": true,
-      "inspectUri": "{wsProtocol}://{url.hostname}:{url.port}/_framework/debug/ws-proxy?browser={browserInspectUri}",
-      "applicationUrl": "https://localhost:7252;http://localhost:5062"
+      "launchBrowser": false
     },
+
     "IIS Express": {
       "commandName": "IISExpress",
       "launchBrowser": true,
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
-      },
-      "inspectUri": "{wsProtocol}://{url.hostname}:{url.port}/_framework/debug/ws-proxy?browser={browserInspectUri}"
+      }
     },
     "FastAPI": {
       "commandName": "Executable",
       "executablePath": "cmd.exe",
-      "commandLineArgs": "/C start \"\" \"C:\\Users\\Javier Cid\\source\\repos\\Departamento Financiero\\run_fastapi.bat\"\r\n"
+      "commandLineArgs": "/C start \"\" \"C:\\Users\\Javier Cid\\source\\repos\\DepartamentoFinanciero\\run_fastapi.bat\"\r\n"
     }
   },
   "$schema": "http://json.schemastore.org/launchsettings.json",

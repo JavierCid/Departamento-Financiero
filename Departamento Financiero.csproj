@@ -1,6 +1,7 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
-  <PropertyGroup>
+
+	<PropertyGroup>
 	  <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
 
 	  <TargetFramework>net8.0</TargetFramework>
@@ -12,9 +13,13 @@
 
 
 	<ItemGroup>
+		<Compile Remove="DepartamentoFinancieroLauncher\**" />
 		<Compile Remove="FunctionApp1\**" />
+		<Content Remove="DepartamentoFinancieroLauncher\**" />
 		<Content Remove="FunctionApp1\**" />
+		<EmbeddedResource Remove="DepartamentoFinancieroLauncher\**" />
 		<EmbeddedResource Remove="FunctionApp1\**" />
+		<None Remove="DepartamentoFinancieroLauncher\**" />
 		<None Remove="FunctionApp1\**" />
 
 		<Compile Remove="FastApiLauncher\**" />
@@ -30,8 +35,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="8.0.20" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="8.0.20" PrivateAssets="all" />
+
   </ItemGroup>
 
 	<ItemGroup>

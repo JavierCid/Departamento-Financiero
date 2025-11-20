@@ -1,15 +1,22 @@
 {
+  "$schema": "http://json.schemastore.org/launchsettings.json",
+  "iisSettings": {
+    "windowsAuthentication": false,
+    "anonymousAuthentication": true,
+    "iisExpress": {
+      "applicationUrl": "http://localhost:7252",
+      "sslPort": 44306
+    }
+  },
   "profiles": {
-    "FunctionApp1": {
+    "Departamento Financiero": {
       "commandName": "Project",
-      "commandLineArgs": "--port 7127"
-    },
-    "Container (Dockerfile)": {
-      "commandName": "Docker",
-      "launchUrl": "{Scheme}://{ServiceHost}:{ServicePort}",
-      "containerRunArguments": "--init",
-      "httpPort": 33986,
-      "useSSL": false
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "applicationUrl": "http://localhost:7252",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
     }
   }
 }
