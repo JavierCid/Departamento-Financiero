@@ -1,15 +1,79 @@
-﻿@using Microsoft.AspNetCore.Components.Routing
+﻿@using System
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Routing
+@using Departamento_Financiero.Pages
+@inject NavigationManager Nav
+@implements IDisposable
 
-<Router AppAssembly="@typeof(App).Assembly" PreferExactMatches="true">
-    <Found Context="routeData">
-        <RouteView RouteData="@routeData"
-                   DefaultLayout="@typeof(Departamento_Financiero.Layout.MainLayout)" />
-    </Found>
+<h2 style="color: white; padding: 16px;">
+    DEBUG ruta actual: @_currentPath
+</h2>
 
-    <NotFound>
-        <LayoutView Layout="@typeof(Departamento_Financiero.Layout.MainLayout)">
+@if (_currentPath == "/")
+{
+    <Home />
+}
+else if (_currentPath == "/upload-excel" || _currentPath == "/uploadexcel" || _currentPath == "/contrasteprinex")
+{
+    <UploadExcel />
+}
+else if (_currentPath == "/uploadexcel-contabilidad")
+{
+    <UploadExcelContabilidad />
+}
+else if (_currentPath == "/cuadrepdfprinex")
+{
+    <Cuadrepdfprinex />
+}
+else if (_currentPath == "/bankflowpro")
+{
+    <BankFlowPro />
+}
+else if (_currentPath == "/procesar-pdfs")
+{
+    <h1 style="color: white; padding: 16px;">
+        DEBUG: aquí engancharemos PDFlow (procesar-pdfs).
+    </h1>
+}
 
-            <p>No hay nada en esta dirección.</p>
-        </LayoutView>
-    </NotFound>
-</Router>
+else
+{
+    <div style="color: white; padding: 16px;">
+        <h3>No hay nada en esta dirección</h3>
+        <p>@_currentPath</p>
+    </div>
+}
+
+@code {
+    private string _currentPath = "/";
+
+    protected override void OnInitialized()
+    {
+        UpdatePath(Nav.Uri);
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        UpdatePath(e.Location);
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void UpdatePath(string uri)
+    {
+        var u = new Uri(uri);
+        var path = u.AbsolutePath.ToLowerInvariant().TrimEnd('/');
+
+        if (string.IsNullOrEmpty(path))
+        {
+            path = "/";
+        }
+
+        _currentPath = path;
+    }
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}
