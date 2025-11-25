@@ -1,51 +1,60 @@
-﻿@inherits LayoutComponentBase
+﻿@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Routing
 
-<PageTitle>Departamento Financiero</PageTitle>
+<div class="df-app">
+    <!-- CABECERA GLOBAL -->
+    <header class="df-header">
+        <div class="df-header__inner">
+            <a href="/" class="df-brand">
+                <img src="Images/momentum-logo.png"
+                     alt="Momentum Real Estate"
+                     class="df-logo" />
+                <span>Momentum Real Estate S.L.</span>
+            </a>
 
-<div class="df-shell">
-    <header class="df-topbar">
-        <div class="df-topbar-left">
-            <img src="/Images/momentum-logo.png" alt="Momentum" class="df-logo" />
-            <span class="df-company">Momentum Real Estate S.L.</span>
+            <nav class="df-nav">
+                <NavLink href="/"
+                         Match="NavLinkMatch.All"
+                         class="df-nav__link"
+                         activeClass="active">
+                    Inicio
+                </NavLink>
+
+                <NavLink href="/procesar-pdfs"
+                         class="df-nav__link"
+                         activeClass="active">
+                    Procesar facturas
+                </NavLink>
+
+                <NavLink href="/upload-excel"
+                         class="df-nav__link"
+                         activeClass="active">
+                    Contraste Prinex
+                </NavLink>
+
+                <NavLink href="/bankflowpro"
+                         class="df-nav__link"
+                         activeClass="active">
+                    BankFlow Pro
+                </NavLink>
+            </nav>
         </div>
-
-        <nav class="df-nav">
-            <NavLink href="/" Match="NavLinkMatch.All" class="df-nav-link">
-                Inicio
-            </NavLink>
-
-            <NavLink href="/upload-excel" class="df-nav-link">
-                Contraste Prinex
-            </NavLink>
-
-            <NavLink href="/bankflowpro" class="df-nav-link">
-                BankFlow Pro
-            </NavLink>
-
-            <NavLink href="/procesar-pdfs" class="df-nav-link">
-                PDFlow
-            </NavLink>
-        </nav>
     </header>
 
-    <main>
-        @if (Body is not null)
-        {
-            @Body
-        }
-        else if (ChildContent is not null)
-        {
+    <!-- CONTENIDO DE CADA PÁGINA -->
+    <main class="df-main df-bg">
+        <div class="df-container">
             @ChildContent
-        }
+        </div>
     </main>
 
-
+    <!-- FOOTER GLOBAL -->
     <footer class="df-footer">
         © 2025 Departamento Financiero — Sistema interno de automatización
     </footer>
 </div>
+
 @code {
     [Parameter]
     public RenderFragment? ChildContent { get; set; }
 }
-

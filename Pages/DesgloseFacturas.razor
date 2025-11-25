@@ -1,33 +1,73 @@
-﻿@page "/procesar-pdfs"
-@page "/desglose-facturas"
-
+﻿@page "/desglose-facturas"
 @inject HttpClient Http
 @inject IJSRuntime JS
 
-<h3>Desglose de facturas</h3>
+<div class="df-container">
 
-<div class="mb-3">
-    <InputFile OnChange="OnFileSelected" />
-    <button class="btn btn-primary ms-2" @onclick="Upload" disabled="@(!canSend || busy)">
-        @(busy ? "Enviando..." : "Enviar")
-    </button>
-</div>
+    <!-- Cabecera PDFFlow -->
+    <div class="pdf-head">
+        <h3>Desglose de facturas</h3>
+        <p class="pdf-desc">
+            Procesa tus PDFs de facturas y genera automáticamente un Excel con el desglose listo para contabilidad.
+        </p>
+        <img class="pdf-logo" src="/Images/pdf_logo.png" alt="PDFFlow" />
+    </div>
 
-@if (!string.IsNullOrWhiteSpace(okMsg))
-{
-    <div class="alert alert-success">@okMsg</div>
-}
-@if (!string.IsNullOrWhiteSpace(errMsg))
-{
-    <div class="alert alert-danger">@errMsg</div>
-}
+    <!-- Uploader superior (botón + procesar) -->
+    <div class="df-uploader">
+        <div class="df-filepick">
+            <button type="button" class="btn btn-ghost df-filebtn">
+                Seleccionar facturas (PDF)
+            </button>
+            <InputFile OnChange="OnFileSelected" accept=".pdf" />
+        </div>
 
-@if (preview?.Lineas?.Count > 0)
-{
-    <div class="card">
-        <div class="card-header">Vista previa (Desglose)</div>
-        <div class="card-body p-0">
-            <table class="table table-sm mb-0">
+        <button class="btn btn-primary" @onclick="Upload" disabled="@(!canSend || busy)">
+            @(busy ? "Procesando..." : "Procesar")
+        </button>
+    </div>
+
+    <!-- Dropzone estilo BankFlow/PDFFlow -->
+    <div class="@($"df-drop df-drop--hero{(drag ? " drag" : string.Empty)}")"
+         @ondragover:preventDefault
+         @ondragenter="() => SetDrag(true)"
+         @ondragleave="() => SetDrag(false)"
+         @ondrop="() => SetDrag(false)">
+
+        <InputFile class="df-drop__input" OnChange="OnFileSelected" accept=".pdf" />
+
+        <div class="df-drop__icon">
+            <i class="bi bi-file-earmark-pdf"></i>
+        </div>
+        <div class="df-drop__title">Arrastra aquí tus facturas en PDF</div>
+        <div class="df-drop__hint">…o usa “Seleccionar facturas (PDF)”</div>
+    </div>
+
+    <!-- Nombre del archivo -->
+    @if (file is not null)
+    {
+        <div class="df-files">
+            <div class="item">@file.Name</div>
+        </div>
+    }
+
+    <!-- Mensajes -->
+    @if (!string.IsNullOrWhiteSpace(okMsg))
+    {
+        <div class="alert alert-success mt-2">@okMsg</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(errMsg))
+    {
+        <div class="alert alert-danger mt-2">@errMsg</div>
+    }
+
+    <!-- Vista previa (mismo modelo que antes, pero con tus estilos df-preview) -->
+    @if (preview?.Lineas?.Count > 0)
+    {
+        <div class="df-preview card df-card p-3 mt-3">
+            <h5>Vista previa (Desglose)</h5>
+
+            <table class="table table-sm table-striped table-hover mb-0">
                 <thead>
                     <tr>
                         <th style="width: 140px;">Cuenta</th>
@@ -47,8 +87,9 @@
                 </tbody>
             </table>
         </div>
-    </div>
-}
+    }
+</div>
+
 @code
 {
     // ===== Estado UI =====
@@ -57,6 +98,8 @@
     bool canSend => file is not null;
     string? okMsg;
     string? errMsg;
+
+    bool drag;
 
     // ===== Modelo de vista previa (de X-Preview) =====
     PreviewDto? preview;
@@ -68,8 +111,8 @@
     sealed class PreviewLine
     {
         public string Cuenta { get; set; } = "";
-        public string Concepto { get; set; } = "";
         public decimal Importe { get; set; }
+        public string Concepto { get; set; } = "";
     }
 
     void OnFileSelected(InputFileChangeEventArgs e)
@@ -79,6 +122,8 @@
         preview = null;
         StateHasChanged();
     }
+
+    void SetDrag(bool value) => drag = value;
 
     async Task Upload()
     {
@@ -127,7 +172,6 @@
             // 5) Descargar el Excel resultante
             var outBytes = await resp.Content.ReadAsByteArrayAsync();
             var outName = GetFileNameFromContentDisposition(resp) ?? $"Desglose_{System.IO.Path.GetFileName(file.Name)}";
-            // Usa tu helper JS de wwwroot/download.js
             var base64 = Convert.ToBase64String(outBytes);
             await JS.InvokeVoidAsync("downloadFileFromBytes", outName, base64);
 
@@ -150,13 +194,13 @@
         {
             try
             {
-                // p.ej. UTF-8''Nombre%20con%20espacios.xlsx
                 var idx = star.IndexOf("''", StringComparison.Ordinal);
                 var encoded = idx >= 0 ? star[(idx + 2)..] : star;
                 return Uri.UnescapeDataString(encoded.Trim('"'));
             }
-            catch { /* ignore */ }
+            catch { }
         }
+
         var fn = resp.Content.Headers.ContentDisposition?.FileName;
         return string.IsNullOrWhiteSpace(fn) ? null : fn.Trim('"');
     }

@@ -618,33 +618,13 @@ table.table thead th {
 table.table tbody td {
     padding-left: 18px; /* iguala el contenido con la cabecera */
 }
-/* ==== Logo decorativo en la sección principal (hero) ==== */
-.df-hero {
-    position: relative;
-    overflow: hidden;
-}
 
-    .df-hero::after {
-        content: "";
-        position: absolute;
-        bottom: 24px;
-        right: 32px;
-        width: 90px; /* 15% más grande */
-        height: 90px;
-        background-image: url("Images/momentum-logo.png");
-        background-repeat: no-repeat;
-        background-position: center;
-        background-size: contain;
-        opacity: 0.25; /* mejor visibilidad pero aún elegante */
-        filter: contrast(1.25) brightness(1.08);
-        pointer-events: none;
-        z-index: 2;
-    }
+
 /* === 1) Página un poco más ancha (afecta a todo el contenido) === */
 /* tamaño “estrecho” elegante */
 .df-container {
     max-width: 1180px; /* 1100–1200 queda muy bien */
-    width: min(1180px, 94vw); /* respeta el viewport en pantallas pequeñas */
+    width: min(1080px, 94vw); /* respeta el viewport en pantallas pequeñas */
     margin: 0 auto; /* centrado */
     padding: 0 16px; /* un poco de aire a los lados */
 }
