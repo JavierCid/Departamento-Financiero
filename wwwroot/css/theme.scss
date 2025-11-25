@@ -111,3 +111,49 @@ h1, h2, h3, h4, h5 {
     background: rgba(255,255,255,.12);
     border-radius: 8px;
 }
+/* ==== Iconos de características — glow futurista ==== */
+.df-values {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 28px;
+    background: #121826;
+    border-radius: 16px;
+    padding: 34px 32px;
+    margin-top: 40px;
+    box-shadow: var(--df-shadow);
+}
+
+.df-value {
+    text-align: center;
+    color: #e8ecff;
+    padding: 0 18px;
+}
+
+.df-value-icon {
+    width: 88px;
+    height: 88px;
+    margin: 0 auto 16px;
+    border-radius: 24px;
+    background: radial-gradient(circle at 30% 10%, rgba(122,240,255,.55), transparent 60%), radial-gradient(circle at 80% 90%, rgba(91,156,255,.75), transparent 65%);
+    box-shadow: 0 0 26px rgba(91,156,255,.55), 0 14px 32px rgba(0,0,0,.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.df-value-icon i {
+    font-size: 40px;
+    color: #e9f5ff;
+    text-shadow: 0 0 10px rgba(122,240,255,.9);
+}
+
+.df-value h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.df-value p {
+    font-size: 15px;
+    color: #c3cff5;
+}
