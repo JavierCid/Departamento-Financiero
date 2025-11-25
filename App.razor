@@ -1,47 +1,54 @@
-﻿@using System
-@using Microsoft.AspNetCore.Components
-@using Microsoft.AspNetCore.Components.Routing
+﻿@using Microsoft.AspNetCore.Components.Routing
 @using Departamento_Financiero.Pages
+@using Departamento_Financiero.Layout
+
 @inject NavigationManager Nav
 @implements IDisposable
 
-<h2 style="color: white; padding: 16px;">
-    DEBUG ruta actual: @_currentPath
-</h2>
-
 @if (_currentPath == "/")
 {
-    <Home />
+    <MainLayout>
+        <Home />
+    </MainLayout>
 }
-else if (_currentPath == "/upload-excel" || _currentPath == "/uploadexcel" || _currentPath == "/contrasteprinex")
+else if (_currentPath == "/upload-excel" || _currentPath == "/contrasteprinex")
 {
-    <UploadExcel />
+    <MainLayout>
+        <UploadExcel />
+    </MainLayout>
 }
 else if (_currentPath == "/uploadexcel-contabilidad")
 {
-    <UploadExcelContabilidad />
+    <MainLayout>
+        <UploadExcelContabilidad />
+    </MainLayout>
 }
 else if (_currentPath == "/cuadrepdfprinex")
 {
-    <Cuadrepdfprinex />
+    <MainLayout>
+        <Cuadrepdfprinex />
+    </MainLayout>
 }
 else if (_currentPath == "/bankflowpro")
 {
-    <BankFlowPro />
+    <MainLayout>
+        <BankFlowPro />
+    </MainLayout>
 }
-else if (_currentPath == "/procesar-pdfs")
+else if (_currentPath == "/procesar-pdfs" || _currentPath == "/desglose-facturas")
 {
-    <h1 style="color: white; padding: 16px;">
-        DEBUG: aquí engancharemos PDFlow (procesar-pdfs).
-    </h1>
+    <MainLayout>
+        <DesgloseFacturas />
+    </MainLayout>
 }
-
 else
 {
-    <div style="color: white; padding: 16px;">
-        <h3>No hay nada en esta dirección</h3>
-        <p>@_currentPath</p>
-    </div>
+    <MainLayout>
+        <div style="color:white; padding:16px;">
+            <h3>No hay nada en esta dirección</h3>
+            <p>@_currentPath</p>
+        </div>
+    </MainLayout>
 }
 
 @code {
@@ -49,27 +56,33 @@ else
 
     protected override void OnInitialized()
     {
-        UpdatePath(Nav.Uri);
+        ActualizarRuta(Nav.Uri);
         Nav.LocationChanged += OnLocationChanged;
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
-        UpdatePath(e.Location);
+        ActualizarRuta(e.Location);
         InvokeAsync(StateHasChanged);
     }
 
-    private void UpdatePath(string uri)
+    private void ActualizarRuta(string uri)
     {
-        var u = new Uri(uri);
-        var path = u.AbsolutePath.ToLowerInvariant().TrimEnd('/');
+        var baseUri = Nav.BaseUri;
 
-        if (string.IsNullOrEmpty(path))
+        if (uri.StartsWith(baseUri, StringComparison.OrdinalIgnoreCase))
         {
-            path = "/";
+            _currentPath = "/" + uri.Substring(baseUri.Length).TrimStart('/');
+        }
+        else
+        {
+            _currentPath = "/";
         }
 
-        _currentPath = path;
+        if (string.IsNullOrWhiteSpace(_currentPath))
+        {
+            _currentPath = "/";
+        }
     }
 
     public void Dispose()

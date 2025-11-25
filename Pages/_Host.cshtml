@@ -1,12 +1,9 @@
 @page "/"
-@using Microsoft.AspNetCore.Components.Web
-@using Departamento_Financiero
 @namespace Departamento_Financiero.Pages
 @addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
 @{
     Layout = null;
 }
-
 
 <!DOCTYPE html>
 <html lang="es">
@@ -18,10 +15,9 @@
     <link rel="stylesheet" href="css/app.css" />
 </head>
 <body>
-    <app>
-        <component type="typeof(Departamento_Financiero.App)" render-mode="ServerPrerendered" />
-
-    </app>
+    <div id="app">
+        <component type="typeof(App)" render-mode="ServerPrerendered" />
+    </div>
 
     <script src="_framework/blazor.server.js"></script>
 </body>

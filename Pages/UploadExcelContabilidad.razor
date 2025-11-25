@@ -81,12 +81,17 @@
 
 @if (_preview is not null)
 {
+    // Copiamos a una variable no-nullable para que el compilador deje de quejarse
+    var model = _preview!;
+
     <div class="df-preview card df-card p-3 mt-3">
         <h5 class="mb-3">Resumen de comparación</h5>
 
-        <h6 class="mb-2">Faltantes (@(_preview.Faltantes?.Count ?? 0))</h6>
-        <table class="table table-sm table-striped table-hover" style="font-size:.85rem">
+        <h6 class="mb-2">
+            Faltantes (@(model.Faltantes?.Count ?? 0))
+        </h6>
 
+        <table class="table table-sm table-striped table-hover" style="font-size:.85rem">
             <thead>
                 <tr>
                     <th style="width:40%">Nº Factura</th>
@@ -94,7 +99,7 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach (var f in _preview.Faltantes ?? new())
+                @foreach (var f in model.Faltantes ?? new List<Faltante>())
                 {
                     <tr>
                         <td>@f.Factura</td>
@@ -104,7 +109,10 @@
             </tbody>
         </table>
 
-        <h6 class="mt-3 mb-2">Descuadres (@(_preview.Descuadres?.Count ?? 0))</h6>
+        <h6 class="mt-3 mb-2">
+            Descuadres (@(model.Descuadres?.Count ?? 0))
+        </h6>
+
         <table class="table table-sm table-striped table-hover" style="font-size:.85rem">
             <thead>
                 <tr>
@@ -115,7 +123,7 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach (var d in _preview.Descuadres ?? new())
+                @foreach (var d in model.Descuadres ?? new List<Descuadre>())
                 {
                     <tr>
                         <td>@d.Factura</td>
@@ -126,10 +134,13 @@
                 }
             </tbody>
         </table>
-        @if (_preview?.FaltantesInverso is not null)
 
+        @if (model.FaltantesInverso is not null)
         {
-            <h6 class="mt-3 mb-2">En Mayores y no en Prinex (@_preview.FaltantesInverso.Count)</h6>
+            <h6 class="mt-3 mb-2">
+                En Mayores y no en Prinex (@model.FaltantesInverso.Count)
+            </h6>
+
             <table class="table table-sm table-striped table-hover" style="font-size:.85rem">
                 <thead>
                     <tr>
@@ -138,7 +149,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var f in _preview.FaltantesInverso)
+                    @foreach (var f in model.FaltantesInverso)
                     {
                         <tr>
                             <td>@f.Factura</td>
@@ -149,12 +160,16 @@
             </table>
         }
 
-
-        <div class="text-muted small">
-            Mostrando @((_preview.Faltantes?.Count ?? 0) + (_preview.Descuadres?.Count ?? 0) + (_preview.FaltantesInverso?.Count ?? 0)) elementos.
-        </div>
+    <div class="text-muted small">
+        Mostrando
+        @((model.Faltantes?.Count ?? 0)
+                + (model.Descuadres?.Count ?? 0)
+                + (model.FaltantesInverso?.Count ?? 0))
+        elementos.
     </div>
+</div>
 }
+
 
 @code {
     // ---- Estado ----
