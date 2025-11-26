@@ -3,8 +3,8 @@
 		<TargetFramework>net8.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
-		<OutputType>Library</OutputType>
-		<!-- Configuración para librería -->
+		<OutputType>Exe</OutputType>
+		<AzureFunctionsVersion>v4</AzureFunctionsVersion>
 	</PropertyGroup>
 
 	<ItemGroup>

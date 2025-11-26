@@ -215,10 +215,13 @@
             var bytes = ms.ToArray();
 
             using var content = new ByteArrayContent(bytes);
-            content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            content.Headers.ContentType = new MediaTypeHeaderValue(
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
             content.Headers.Add("X-File-Name", _selectedFile.Name);
 
-            string apiUrl = $"http://localhost:7127/api/ProcesarExcel?mes={_mes}&anio={_anio}";
+            string apiUrl = $"http://localhost:7071/api/ProcesarExcel?mes={_mes}&anio={_anio}";
+
 
 
             var resp = await Http.PostAsync(apiUrl, content);
@@ -250,10 +253,11 @@
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            _error = "Error al procesar el archivo.";
+            _error = ex.Message;
         }
+
         finally
         {
             _busy = false;

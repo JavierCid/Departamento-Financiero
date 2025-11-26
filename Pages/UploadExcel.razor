@@ -1,44 +1,38 @@
 ﻿@page "/upload-excel"
 @page "/contrasteprinex"
 
-
 @inject NavigationManager Nav
 
-
-    <div class="prinex-head">
-        <h3>Contraste Prinex</h3>
-        <img class="prinex-logo" src="/Images/prinex_logo.png" alt="Prinex" />
-    </div>
-
-    <div class="prinex-desc">
-        Elige el tipo de contraste que deseas realizar:
-    </div>
-
-    <div class="df-selector">
-        <a class="df-bigbtn df-btn-conta" href="/uploadexcel-contabilidad">
-            <img src="/Images/icon-contabilidad.png" class="df-icon" alt="Contabilidad" />
-            <span>Contraste contabilidad ↔ Prinex</span>
-        </a>
-
-
-        <a class="df-bigbtn df-btn-factu" href="/cuadrepdfprinex">
-            <img src="/Images/icon-facturacion.png" class="df-icon" alt="Facturación" />
-            <span>Contraste facturación ↔ Prinex</span>
-        </a>
+<div class="prinex-head">
+    <h3>Contraste Prinex</h3>
+    <img class="prinex-logo" src="/Images/prinex_logo.png" alt="Prinex" />
 </div>
 
+<div class="prinex-desc">
+    Elige el tipo de contraste que deseas realizar:
+</div>
 
+<div class="df-selector">
+    <a class="df-bigbtn df-btn-conta" href="/uploadexcel-contabilidad">
+        <img src="/Images/icon-contabilidad.png" class="df-icon" alt="Contabilidad" />
+        <span>Contraste contabilidad ↔ Prinex</span>
+    </a>
 
+    <a class="df-bigbtn df-btn-factu" href="/cuadrepdfprinex">
+        <img src="/Images/icon-facturacion.png" class="df-icon" alt="Facturación" />
+        <span>Contraste facturación ↔ Prinex</span>
+    </a>
+</div>
 
-    <style>
-        .df-selector {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 1.8rem;
-            margin-top: 3rem;
-        }
+<style>
+    .df-selector {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.8rem;
+        margin-top: 3rem;
+    }
 
     .df-bigbtn {
         display: flex;
@@ -48,21 +42,19 @@
         font-size: 1.15rem;
         padding: 1rem 1.8rem;
         width: 420px;
-        border-radius: 1rem; /* 🔹 Más suaves */
+        border-radius: 1rem;
         color: #ffffff;
         font-weight: 600;
-        background: linear-gradient(135deg, #3b5fa8, #4a73c2); /* 🔹 Azul Prinex atenuado */
+        background: linear-gradient(135deg, #3b5fa8, #4a73c2);
         border: 1px solid #5a7ed0;
         box-shadow: 0 6px 14px rgba(0, 0, 0, 0.25);
         transition: all 0.25s ease;
         white-space: nowrap;
     }
 
-        
-    /* 🔹 Ambos iguales */
     .df-btn-conta,
     .df-btn-factu {
-        background: linear-gradient(135deg, #4a5f88, #566f99); /* 🔹 Azul grisáceo suave */
+        background: linear-gradient(135deg, #4a5f88, #566f99);
         border: 1px solid #6a80a8;
     }
 
@@ -71,17 +63,14 @@
         height: 48px;
         margin-left: -0.2rem;
         object-fit: contain;
-        filter: brightness(12) saturate(0) opacity(0.9); /* 🔹 Blanco suave, no chillón */
+        filter: brightness(12) saturate(0) opacity(0.9);
         transition: filter 0.3s ease, opacity 0.3s ease;
     }
 
     .df-bigbtn:hover .df-icon {
-        filter: brightness(15) saturate(0) opacity(1); /* 🔹 Un poco más brillante al pasar el ratón */
+        filter: brightness(15) saturate(0) opacity(1);
     }
 
-
-
-    /* 🔹 Texto mejor alineado */
     .df-bigbtn span {
         flex-grow: 1;
         text-align: left;
@@ -92,5 +81,4 @@
         box-shadow: 0 0 18px rgba(80, 140, 255, 0.4);
         transform: translateY(-2px);
     }
-
-    </style>
+</style>
