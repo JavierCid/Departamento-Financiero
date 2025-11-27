@@ -2,7 +2,8 @@
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
-using System;
+
+
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -30,7 +31,35 @@ namespace FunctionApp1
         private sealed class Faltante { public string Factura { get; set; } = ""; public decimal Importe { get; set; } }
         private sealed class Descuadre { public string Factura { get; set; } = ""; public decimal Prinex { get; set; } public decimal Mayores { get; set; } public decimal Diferencia { get; set; } }
 
-    
+        // === Vista previa cuadre PDFs ↔ Prinex ===
+        private sealed class PreviewPdfDto
+        {
+            public List<PdfCoincidencia> Coincidencias { get; set; } = new();
+            public List<string> Faltantes { get; set; } = new();
+            public List<string> Descuadres { get; set; } = new();
+        }
+
+        private sealed class PdfCoincidencia
+        {
+            public string? Documento { get; set; }
+            public string? CoincidenciaDetectada { get; set; }
+        }
+
+        // Payload que viene de Blazor (PDFs + Excel en base64)
+        private sealed class CuadreRequest
+        {
+            public List<CuadreFile> Pdfs { get; set; } = new();
+            public CuadreFile? Excel { get; set; }
+        }
+
+        private sealed class CuadreFile
+        {
+            public string Name { get; set; } = string.Empty;
+            public string Base64 { get; set; } = string.Empty;
+        }
+
+
+
         private readonly ILogger _logger;
 
         public Function1(ILoggerFactory loggerFactory)
@@ -215,10 +244,64 @@ namespace FunctionApp1
 
         }
 
+        // ============================================================
+        // ======= HTTP API: cuadro facturación ↔ Prinex (PDFs) ========
+        // ============================================================
+        [Function("ContrasteFacturas")]
+        public async Task<HttpResponseData> ContrasteFacturas(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "post", "options", Route = "contraste-facturas")]
+            HttpRequestData req)
+        {
+            // Preflight
+            if (req.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
+            {
+                var pre = req.CreateResponse(HttpStatusCode.NoContent);
+                AddCors(pre, req);
+                return pre;
+            }
+
+            try
+            {
+                using var reader = new StreamReader(req.Body);
+                var body = await reader.ReadToEndAsync();
+
+                var data = System.Text.Json.JsonSerializer.Deserialize<CuadreRequest>(
+                    body,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (data is null || data.Pdfs is null || data.Pdfs.Count == 0 || data.Excel is null)
+                {
+                    var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await bad.WriteStringAsync("Faltan PDFs o el Excel en la petición.");
+                    AddCors(bad, req);
+                    return bad;
+                }
+
+                var excelBytes = Convert.FromBase64String(data.Excel.Base64);
+                var preview = BuildPreviewFromPdfNamesAndExcel(excelBytes, data.Pdfs);
+
+                var resp = req.CreateResponse(HttpStatusCode.OK);
+                resp.Headers.Add("X-Preview", System.Text.Json.JsonSerializer.Serialize(preview));
+
+                // El front sólo usa la cabecera
+                await resp.WriteStringAsync("OK");
+                AddCors(resp, req);
+                return resp;
+            }
+            catch (Exception ex)
+            {
+                var err = req.CreateResponse(HttpStatusCode.InternalServerError);
+                await err.WriteStringAsync($"Error procesando PDFs/Excel: {ex.Message}");
+                AddCors(err, req);
+                return err;
+            }
+        }
+
         // CORS dinámico
         public static void AddCors(HttpResponseData resp, HttpRequestData req)
-{
-    var origin = GetAllowedOrigin(req);
+
+        {
+            var origin = GetAllowedOrigin(req);
     if (!string.IsNullOrEmpty(origin))
     {
         resp.Headers.Add("Access-Control-Allow-Origin", origin);
@@ -558,13 +641,102 @@ namespace FunctionApp1
             using var outMs = new MemoryStream();
             wb.SaveAs(outMs);
             return await Task.FromResult((outMs.ToArray(), faltantesInverso));
+        }
 
+        // ============================================================
+        // ======== LÓGICA CUADRE PDFs ↔ PRINEX (simplificada) ========
+        // ============================================================
+        private static PreviewPdfDto BuildPreviewFromPdfNamesAndExcel(
+            byte[] excelBytes,
+            List<CuadreFile> pdfFiles)
+        {
+            var result = new PreviewPdfDto();
 
+            using var ms = new MemoryStream(excelBytes);
+            using var wb = new XLWorkbook(ms);
+
+            var ws = wb.Worksheets.FirstOrDefault(s =>
+                          string.Equals(s.Name, "Sheet1", StringComparison.OrdinalIgnoreCase))
+                     ?? wb.Worksheets.FirstOrDefault(s =>
+                          string.Equals(s.Name, "Hoja1", StringComparison.OrdinalIgnoreCase))
+                     ?? wb.Worksheets.First();
+
+            var reqSrc = new[] { "S/Fra. Número", "Importe" };
+            int headerRow = FindHeaderRow(ws, reqSrc, 60);
+            if (headerRow == 0) headerRow = 1;
+
+            int cFra = FindHeaderCol(ws, headerRow, "S/Fra. Número");
+            int cImporte = FindHeaderCol(ws, headerRow, "Importe");
+
+            if (cFra == 0)
+                throw new InvalidOperationException("No se encuentra la columna 'S/Fra. Número' en el Excel de Prinex.");
+
+            var prinex = new Dictionary<string, (string Display, decimal Importe)>(StringComparer.Ordinal);
+            int lastRow = ws.LastRowUsed()?.RowNumber() ?? headerRow;
+
+            for (int r = headerRow + 1; r <= lastRow; r++)
+            {
+                var raw = ws.Cell(r, cFra).Value;
+                var token = ExtractNumToken(raw);
+                var mk = MakeMatchKey(token);
+                if (string.IsNullOrEmpty(mk)) continue;
+
+                decimal importe = cImporte > 0 ? SafeNumber(ws.Cell(r, cImporte).Value) : 0m;
+                string display = MakeDisplayKey(token);
+
+                if (!prinex.ContainsKey(mk))
+                    prinex[mk] = (display, importe);
+            }
+
+            var pdfKeys = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            foreach (var pdf in pdfFiles)
+            {
+                var name = pdf?.Name ?? string.Empty;
+                var baseName = Path.GetFileNameWithoutExtension(name) ?? string.Empty;
+
+                var token = ExtractNumToken(baseName);
+                var mk = MakeMatchKey(token);
+
+                if (string.IsNullOrEmpty(mk))
+                {
+                    result.Faltantes.Add($"{name} → no se ha podido extraer número de factura");
+                    continue;
+                }
+
+                pdfKeys[mk] = name;
+
+                if (prinex.TryGetValue(mk, out var info))
+                {
+                    result.Coincidencias.Add(new PdfCoincidencia
+                    {
+                        Documento = name,
+                        CoincidenciaDetectada = $"Coincidencia en Prinex ({info.Display}, {info.Importe:0.00} €)"
+                    });
+                }
+                else
+                {
+                    result.Faltantes.Add(name);
+                }
+            }
+
+            foreach (var kv in prinex)
+            {
+                if (!pdfKeys.ContainsKey(kv.Key))
+                {
+                    var info = kv.Value;
+                    result.Descuadres.Add(
+                        $"En Prinex pero sin PDF: {info.Display} ({info.Importe:0.00} €)");
+                }
+            }
+
+            return result;
         }
 
         // ============================================================
         // =================== ESTILO “CUTE PRO” ======================
         // ============================================================
+
 
         private static void StyleComparacionCutePro(IXLWorksheet ws)
         {

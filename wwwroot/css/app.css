@@ -43,7 +43,7 @@ body {
 
 .df-main {
     flex: 1;
-    padding: 35px 18px 24px; /* 10px menos arriba → títulos más cerca de la barra */
+    padding: 25px 18px 24px; /* 10px menos arriba → títulos más cerca de la barra */
 }
 
 
@@ -288,7 +288,7 @@ body {
     background: #121826;
     border-radius: 16px;
     padding: 15px 15px;
-    margin-top: 120px;
+    margin-top: 190px;
     box-shadow: var(--df-shadow);
 }
 
@@ -953,4 +953,10 @@ table.table tbody td {
 /* Ajuste fino: icono central un pelín más abajo */
 .df-value-icon--middle {
     transform: translateY(4px);
+}
+
+/* Manita sobre todos los botones clicables */
+button,
+.btn {
+    cursor: pointer;
 }

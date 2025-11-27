@@ -1,8 +1,10 @@
 ﻿@page "/cuadrepdfprinex"
 
 @using Microsoft.AspNetCore.Components.Forms
+@using System.Text
 @inject HttpClient Http
 @inject IJSRuntime JS
+
 
 <div class="page-Cuadrepdfprinex">
     <div class="prinex-head">
@@ -30,35 +32,46 @@
         </button>
     </div>
 
-    @if (_pdfs.Count > 0 || _excel is not null)
+    @if (_pdfs.Count > 0 || _excel is not null || !string.IsNullOrWhiteSpace(_ok) || !string.IsNullOrWhiteSpace(_err))
     {
-        <div class="df-files small text-muted mt-2">
-            <div>PDFs: @_pdfs.Count archivo(s)</div>
-            @if (_excel is not null)
+        <div class="df-status df-card card mt-3 p-3">
+            <div class="df-files text-muted">
+                @if (_pdfs.Count > 0)
+                {
+                    <div><strong>PDFs cargados:</strong> @_pdfs.Count archivo(s)</div>
+                }
+                @if (_excel is not null)
+                {
+                    <div><strong>Excel Prinex:</strong> @_excel.Name</div>
+                }
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_err))
             {
-                <div>Excel: @_excel.Name</div>
+                <div class="alert alert-danger py-2 mt-3 mb-0">@_err</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_ok))
+            {
+                <div class="alert alert-success py-2 mt-3 mb-0">@_ok</div>
             }
         </div>
-    }
-
-    @if (!string.IsNullOrWhiteSpace(_err))
-    {
-        <div class="alert alert-danger py-2 mt-3">@_err</div>
-    }
-    @if (!string.IsNullOrWhiteSpace(_ok))
-    {
-        <div class="alert alert-success py-2 mt-3">@_ok</div>
     }
 
     @if (_preview is not null)
     {
         <div class="df-preview card df-card p-3 mt-3">
-            <h5 class="mb-3">Vista previa del cruce</h5>
+            <h5 class="mb-2">Vista previa del cruce</h5>
+            
+
 
             @if (_preview.Coincidencias?.Count > 0)
             {
                 <h6>✅ Coincidencias (@_preview.Coincidencias.Count)</h6>
+                <p class="df-section-subtitle">
+                    Facturas que tienen PDF y factura pendiente asociada en Prinex.
+                </p>
                 <table class="table table-sm table-striped table-hover">
+
                     <thead class="table-primary">
                         <tr>
                             <th>Documento</th>
@@ -85,8 +98,11 @@
 
             @if (_preview.Faltantes?.Count > 0)
             {
-                <h6 class="mt-3 text-warning">⚠️ Faltantes en Prinex (@_preview.Faltantes.Count)</h6>
-                <ul>
+                <h6 class="mt-3 text-warning">⚠️ En PDF pero NO en Prinex (@_preview.Faltantes.Count)</h6>
+                <p class="df-section-subtitle">
+                    Facturas que sí tienen PDF cargado pero no aparecen como pendientes en Prinex.
+                </p>
+                <ul class="df-list">
                     @foreach (var f in _preview.Faltantes)
                     {
                         <li>@f</li>
@@ -94,22 +110,64 @@
                 </ul>
             }
 
+
             @if (_preview.Descuadres?.Count > 0)
             {
-                <h6 class="mt-3 text-danger">❌ Importe incorrecto (@_preview.Descuadres.Count)</h6>
-                <ul>
-                    @foreach (var f in _preview.Descuadres)
-                    {
-                        <li>@f</li>
-                    }
-                </ul>
+                <details class="df-toggle mt-3">
+                    <summary>
+                        <div class="df-toggle-header">
+                            <span class="df-toggle-title">
+                                ❌ En Prinex pero sin PDF (@_preview.Descuadres.Count)
+                            </span>
+                            <span class="df-toggle-arrow"></span>
+                        </div>
+                        <div class="df-section-subtitle">
+                            Facturas que figuran en Prinex como pendientes pero no tienen PDF cargado.
+                        </div>
+                    </summary>
+
+                    <table class="table table-sm table-striped table-hover mt-2">
+                        <thead class="table-danger">
+                            <tr>
+                                <th>Nº factura en Prinex</th>
+                                <th>Importe Prinex</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var f in _preview.Descuadres)
+                            {
+                                var parsed = ParsePrinexMissing(f);
+                                <tr>
+                                    <td>@parsed.Numero</td>
+                                    <td>@parsed.Importe</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </details>
             }
+
         </div>
+
     }
 </div>
 
 @code {
-    const string EndpointCuadre = "http://127.0.0.1:8010/api/contraste-facturas";
+    const string EndpointCuadre = "http://localhost:7071/api/contraste-facturas";
+
+    // Payload que mandamos a la Azure Function (PDFs + Excel en base64)
+    private class UploadDto
+    {
+        public List<FileDto> Pdfs { get; set; } = new();
+        public FileDto? Excel { get; set; }
+
+        public class FileDto
+        {
+            public string Name { get; set; } = string.Empty;
+            public string Base64 { get; set; } = string.Empty;
+        }
+    }
+
 
 
 
@@ -123,10 +181,34 @@
 
     void OnPdfsSelected(InputFileChangeEventArgs e)
     {
-        _pdfs = e.GetMultipleFiles().ToList();
-        _ok = _err = null;
+        const int MaxPdfs = 50;                 // límite de número de PDFs
+        const long MaxTotalBytes = 30L * 1024 * 1024; // 30 MB en total
+
+        var files = e.GetMultipleFiles(MaxPdfs);
+        long totalBytes = files.Sum(f => (long)f.Size);
+
+        // Mensajes de validación
+        if (e.FileCount > MaxPdfs)
+        {
+            _err = $"Has seleccionado {e.FileCount} PDFs. El límite actual son {MaxPdfs}. " +
+                   $"Solo se usarán los {MaxPdfs} primeros.";
+        }
+        else if (totalBytes > MaxTotalBytes)
+        {
+            double mb = totalBytes / 1024d / 1024d;
+            double maxMb = MaxTotalBytes / 1024d / 1024d;
+            _err = $"El tamaño total de los PDFs seleccionados ({mb:F1} MB) supera el límite de {maxMb:F0} MB.";
+        }
+        else
+        {
+            _err = null;
+        }
+
+        _pdfs = files.ToList();
+        _ok = null;
         _preview = null;
     }
+
 
     void OnExcelSelected(InputFileChangeEventArgs e)
     {
@@ -142,29 +224,38 @@
 
         try
         {
-            using var form = new MultipartFormDataContent();
+            var dto = new UploadDto();
 
+            // PDFs
             foreach (var pdf in _pdfs)
             {
                 using var ms = new MemoryStream();
                 await pdf.OpenReadStream(long.MaxValue).CopyToAsync(ms);
-                var bytes = new ByteArrayContent(ms.ToArray());
-                bytes.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
-                form.Add(bytes, "facturas", pdf.Name);
 
+                dto.Pdfs.Add(new UploadDto.FileDto
+                {
+                    Name = pdf.Name,
+                    Base64 = Convert.ToBase64String(ms.ToArray())
+                });
             }
 
+            // Excel
             if (_excel is not null)
             {
                 using var ms = new MemoryStream();
                 await _excel.OpenReadStream(long.MaxValue).CopyToAsync(ms);
-                var bytes = new ByteArrayContent(ms.ToArray());
-                bytes.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-                form.Add(bytes, "pendientes", _excel.Name);
 
+                dto.Excel = new UploadDto.FileDto
+                {
+                    Name = _excel.Name,
+                    Base64 = Convert.ToBase64String(ms.ToArray())
+                };
             }
 
-            var resp = await Http.PostAsync(EndpointCuadre, form);
+            var jsonBody = System.Text.Json.JsonSerializer.Serialize(dto);
+            using var content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+
+            var resp = await Http.PostAsync(EndpointCuadre, content);
             if (!resp.IsSuccessStatusCode)
             {
                 _err = $"Error {(int)resp.StatusCode}: " + await resp.Content.ReadAsStringAsync();
@@ -175,7 +266,14 @@
             {
                 var json = vals.FirstOrDefault();
                 if (!string.IsNullOrWhiteSpace(json))
-                    _preview = System.Text.Json.JsonSerializer.Deserialize<PreviewDto>(json);
+                {
+                    _preview = System.Text.Json.JsonSerializer.Deserialize<PreviewDto>(
+                        json,
+                        new System.Text.Json.JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        });
+                }
             }
 
             _ok = "Cruce completado correctamente";
@@ -184,7 +282,10 @@
         {
             _err = ex.Message;
         }
-        finally { _busy = false; }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     // === DTO ===
@@ -199,38 +300,64 @@
             public string? Documento { get; set; }
             public string? CoincidenciaDetectada { get; set; }
         }
-
-
     }
+
+    private (string Numero, string Importe) ParsePrinexMissing(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return (string.Empty, string.Empty);
+
+        var label = "En Prinex pero sin PDF:";
+        var s = raw;
+
+        // Quitar el prefijo "En Prinex pero sin PDF:" si viene en el texto
+        var idxLabel = s.IndexOf(label, StringComparison.OrdinalIgnoreCase);
+        if (idxLabel >= 0)
+            s = s.Substring(idxLabel + label.Length).Trim();
+
+        // Intentar separar "número (importe)"
+        var idxParen = s.LastIndexOf('(');
+        if (idxParen > 0 && s.EndsWith(")"))
+        {
+            var numero = s.Substring(0, idxParen).Trim().TrimEnd(',', ';');
+            var importe = s.Substring(idxParen + 1, s.Length - idxParen - 2).Trim(); // sin paréntesis
+            return (numero, importe);
+        }
+
+        // Si no encaja el patrón, devolvemos todo como número y sin importe
+        return (s, string.Empty);
+    }
+
 }
+
 <style>
     .page-Cuadrepdfprinex .table {
-        table-layout: fixed; /* 🔹 fija el ancho total */
+        table-layout: fixed;
         width: 100%;
         border-collapse: collapse;
     }
 
         .page-Cuadrepdfprinex .table th,
         .page-Cuadrepdfprinex .table td {
-            padding: 0.35rem 0.45rem; /* 🔹 reduce separación */
+            padding: 0.35rem 0.45rem;
             vertical-align: middle;
         }
 
     .page-Cuadrepdfprinex th:nth-child(1),
     .page-Cuadrepdfprinex td:nth-child(1) {
-        width: 45%; /* 🔹 columna Documento */
+        width: 45%;
     }
 
     .page-Cuadrepdfprinex th:nth-child(2),
     .page-Cuadrepdfprinex td:nth-child(2) {
-        width: 55%; /* 🔹 columna Coincidencia */
+        width: 55%;
     }
 
     .page-Cuadrepdfprinex td.text-muted {
         white-space: normal;
         word-break: break-word;
-        color: #f3f4f6; /* 🔹 más claro */
-        font-size: 1rem; /* 🔹 más legible */
+        color: #f3f4f6;
+        font-size: 1rem;
         line-height: 1.2;
         font-weight: 500;
     }
@@ -240,4 +367,115 @@
         color: #fff;
         background: #243b55;
     }
+
+    .page-Cuadrepdfprinex {
+        margin-top: 0.75rem;
+    }
+
+        .page-Cuadrepdfprinex .df-files {
+            margin-top: 0.5rem;
+        }
+
+        .page-Cuadrepdfprinex .df-preview {
+            margin-top: 0.9rem; /* menos hueco entre OK y vista previa */
+        }
+
+            .page-Cuadrepdfprinex .df-preview h5 {
+                margin-top: 0;
+                margin-bottom: 0.35rem; /* acerca “Coincidencias” al título */
+            }
+
+            /* Títulos y subtítulos de la vista previa */
+
+    .page-Cuadrepdfprinex .df-preview h6,
+    .page-Cuadrepdfprinex .df-preview summary {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-bottom: 0.15rem;
+    }
+
+
+        .page-Cuadrepdfprinex .df-section-subtitle {
+            font-size: 0.85rem;
+            color: #9ca3af;
+            margin-top: 0.15rem;
+            margin-bottom: 1.25rem; /* más aire antes de la tabla */
+        }
+
+
+
+        /* Bloque PDFs/Excel + mensajes */
+        .page-Cuadrepdfprinex .df-status {
+            margin-top: 1.5rem; /* separa del logo Prinex */
+            background: #0f172a;
+            border-radius: 0.75rem;
+            border: 1px solid #1f2937;
+            font-size: 0.9rem;
+        }
+
+            .page-Cuadrepdfprinex .df-status .df-files div + div {
+                margin-top: 0.15rem;
+            }
+
+            .page-Cuadrepdfprinex .df-status .alert {
+                margin-top: 0.6rem;
+                margin-bottom: 0;
+                padding: 0.35rem 0.9rem;
+                border-radius: 999px; /* pastilla redondeada */
+                display: inline-block;
+                font-size: 0.85rem;
+            }
+
+
+        /* Desplegable “En Prinex pero sin PDF” */
+        .page-Cuadrepdfprinex .df-toggle {
+            margin-top: 1rem;
+            padding: 0.55rem 0.75rem;
+            border-radius: 0.75rem;
+            background: #111827;
+            border: 1px solid #1f2937;
+        }
+
+            .page-Cuadrepdfprinex .df-toggle > summary {
+                list-style: none;
+                cursor: pointer;
+                padding: 0;
+            }
+
+                /* Quita el marcador por defecto del summary */
+                .page-Cuadrepdfprinex .df-toggle > summary::marker {
+                    content: "";
+                }
+
+        .page-Cuadrepdfprinex .df-toggle-header {
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .page-Cuadrepdfprinex .df-toggle-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+
+        .page-Cuadrepdfprinex .df-toggle-arrow::before {
+            content: "▼";
+            margin-left: 0.5rem;
+            font-size: 1.05rem;
+            opacity: 0.9;
+        }
+
+        .page-Cuadrepdfprinex .df-toggle[open] .df-toggle-arrow::before {
+            content: "▲";
+        }
+
+        .page-Cuadrepdfprinex .df-toggle table {
+            margin-top: 0.75rem;
+            margin-bottom: 0;
+        }
+
+        /* Manita en todos los botones de esta página */
+        .page-Cuadrepdfprinex .btn {
+            cursor: pointer;
+        }
+
 </style>

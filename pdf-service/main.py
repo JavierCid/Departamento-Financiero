@@ -1,5 +1,5 @@
-# main.py
-from fastapi import FastAPI, UploadFile, File, HTTPException, Response
+from fastapi import FastAPI, UploadFile, File, HTTPException, Response, Request
+
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 from urllib.parse import quote
@@ -10,14 +10,20 @@ import pdfplumber
 from extractor import extract_from_pages
 from datetime import datetime
 from bankflow_rules import process_bankflow  # ← Usamos el pipeline completo
-
-# =========================
-# App + CORS (versión estable local)
-# =========================
-from fastapi import FastAPI, Response
-from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
 
 app = FastAPI()
+
+# CORS para que Blazor pueda llamar al servicio en local
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],      # en local nos da igual el origen
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 
 # 🔧 Aceptar cualquier origen en local (localhost / 127.0.0.1)
 app.add_middleware(
@@ -331,12 +337,34 @@ def parse_pdf_to_df(pdf_bytes: bytes, nombre_archivo: str) -> pd.DataFrame:
 
 
 @app.post("/api/pdf2excel")
-async def pdf2excel(file: List[UploadFile] = File(...)):
-    if not file:
+async def pdf2excel(
+    request: Request,
+    file: List[UploadFile] = File(None),
+    files: List[UploadFile] = File(None),
+):
+    """
+    Recibe uno o varios PDFs como multipart/form-data (campos 'files' o 'file')
+    reenviados por la Function y devuelve un Excel + X-Preview para Blazor.
+    """
+    # 1) Unificar todos los ficheros recibidos
+    uploads: List[UploadFile] = []
+    if file:
+        uploads.extend(file)
+    if files:
+        uploads.extend(files)
+
+    # Fallback: intentar leer cualquier campo tipo fichero del formulario
+    if not uploads:
+        form = await request.form()
+        for v in form.values():
+            if isinstance(v, UploadFile):
+                uploads.append(v)
+
+    if not uploads:
         raise HTTPException(status_code=400, detail="Sube al menos un PDF")
 
-    dfs: list[pd.DataFrame] = []
-    for f in file:
+    dfs: List[pd.DataFrame] = []
+    for f in uploads:
         if not f.filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail=f"'{f.filename}' no es un PDF")
 
@@ -354,7 +382,7 @@ async def pdf2excel(file: List[UploadFile] = File(...)):
 
     df_total = pd.concat(dfs, ignore_index=True) if len(dfs) > 1 else dfs[0]
 
-    # Generar Excel
+    # ===== Generar Excel (igual que antes) =====
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as w:
         cols = [
@@ -410,7 +438,30 @@ async def pdf2excel(file: List[UploadFile] = File(...)):
 
     xlsx_bytes = out.getvalue()
 
-    # Vista previa
+    # ===== Vista previa para DesglosarFacturas (Cuenta / Concepto / Importe) =====
+    lineas = []
+    for _, r in df_total.head(200).iterrows():
+        cuenta = str(r.get("Proveedor") or "").strip()
+        if len(cuenta) > 30:
+            cuenta = cuenta[:30] + "…"
+
+        concepto = str(r.get("Concepto") or r.get("Invoice") or "").strip()
+        if len(concepto) > 80:
+            concepto = concepto[:80] + "…"
+
+        bruto_val = r.get("Importe Bruto") or r.get("Neto") or 0
+        if isinstance(bruto_val, (int, float)):
+            importe = float(bruto_val)
+        else:
+            importe = _to_float_eu(bruto_val) or 0.0
+
+        lineas.append({
+            "Cuenta": cuenta,
+            "Concepto": concepto,
+            "Importe": round(importe, 2),
+        })
+
+    # (Opcional) preview “clásico” por si lo quieres en otras pantallas
     preview_rows = []
     for _, r in df_total.head(50).iterrows():
         preview_rows.append({
@@ -426,7 +477,11 @@ async def pdf2excel(file: List[UploadFile] = File(...)):
             "Total Bruto": _fmt_eur(r.get("Importe Bruto")),
         })
 
-    preview = {"Filas": int(len(df_total)), "Muestra": preview_rows}
+    preview = {
+        "Lineas": lineas,
+        "Filas": int(len(df_total)),
+        "Muestra": preview_rows,
+    }
 
     out_name = "Facturas procesadas.xlsx"
     content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -437,6 +492,9 @@ async def pdf2excel(file: List[UploadFile] = File(...)):
     }
 
     return Response(content=xlsx_bytes, media_type=content_type, headers=headers)
+
+
+
 
 # =========================
 # Endpoint BankFlow Pro
@@ -1039,6 +1097,8 @@ async def bankflowpro(
 
 
 if __name__ == "__main__":
-    import uvicorn
-    print("✅ FastAPI corriendo en http://127.0.0.1:8010")
-    uvicorn.run("main:app", host="127.0.0.1", port=8010, reload=True)
+    import uvicorn  # puedes quitar esta línea si ya lo importas arriba
+    print("✅ FastAPI corriendo en http://127.0.0.1:8000")
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+
+

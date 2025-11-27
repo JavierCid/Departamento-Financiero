@@ -1,17 +1,35 @@
-﻿using System.Net;
-using System.Text.Json;
-using ClosedXML.Excel;
+﻿using System;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using Microsoft.Azure.Functions.Worker;
+
 using Microsoft.Azure.Functions.Worker.Http;
 
 namespace FunctionApp1;
 
 public class DesgloseFunction
 {
-    [Function("pdf2excel")]
-    public async Task<HttpResponseData> Run(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", "options")] HttpRequestData req)
+    private static readonly HttpClient Http = new()
     {
+        Timeout = TimeSpan.FromMinutes(10)
+    };
+
+    // AJUSTA el puerto si tu FastAPI no está en 8000
+    private const string PdfServiceUrl = "http://127.0.0.1:8000/api/pdf2excel";
+
+    [Function("DesglosarFacturas")]
+    public async Task<HttpResponseData> Run(
+        [HttpTrigger(
+            AuthorizationLevel.Anonymous,
+            "post",
+            "options",
+            Route = "DesglosarFacturas")]
+        HttpRequestData req)
+    {
+        // Preflight CORS
         if (req.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
         {
             var pre = req.CreateResponse(HttpStatusCode.NoContent);
@@ -21,187 +39,83 @@ public class DesgloseFunction
 
         try
         {
-            // Nombre original
-            string fileName = req.Headers.TryGetValues("X-File-Name", out var v)
-                                ? (v.FirstOrDefault() ?? "archivo.xlsx")
-                                : "archivo.xlsx";
+            // Necesitamos el Content-Type multipart/form-data con boundary
+            if (!req.Headers.TryGetValues("Content-Type", out var ctValues))
+                return await Bad(req, "Falta cabecera Content-Type multipart/form-data.");
 
-            // Leer PDF desde multipart/form-data
-            if (!req.Headers.Contains("Content-Type") || !req.Headers.GetValues("Content-Type").First().StartsWith("multipart/form-data"))
-                return await Bad(req, "Se esperaba un formulario multipart con un archivo PDF.");
+            var ct = ctValues.FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(ct))
+                return await Bad(req, "Content-Type vacío.");
 
-            var boundary = req.Headers.GetValues("Content-Type").First().Split("boundary=")[1];
-            var reader = new StreamReader(req.Body);
-            var body = await reader.ReadToEndAsync();
-
-            var startIndex = body.IndexOf("PDF");
-            if (startIndex < 0)
-                return await Bad(req, "No se detectó contenido PDF válido.");
-
-            byte[] fileBytes = System.Text.Encoding.UTF8.GetBytes(body.Substring(startIndex));
-            using var ms = new MemoryStream(fileBytes);
-            if (ms.Length == 0) return await Bad(req, "El archivo PDF está vacío.");
-
-            // (A partir de aquí, podrías procesar el PDF o reenviarlo a tu servicio Python)
-
-
-            // ================= LÓGICA DE DESGLOSE =================
-            using var wb = new XLWorkbook(ms);
-
-            // Tomar hoja "MAYORES" si existe; si no, primera con datos
-            var ws = wb.Worksheets.FirstOrDefault(s => s.Name.Equals("MAYORES", StringComparison.OrdinalIgnoreCase))
-                     ?? wb.Worksheets.FirstOrDefault(s => s.FirstCellUsed() != null);
-            if (ws is null) return await Bad(req, "No se encontró ninguna hoja con datos.");
-
-            // Detectar fila de cabeceras (buscamos 'Cuenta', 'Concepto', 'Debe', 'Haber', 'Importe')
-            int headerRow = FindHeaderRow(ws, new[] { "Cuenta", "Concepto" }, 60);
-            if (headerRow == 0) return await Bad(req, "No se localizaron cabeceras (mínimo: 'Cuenta' y 'Concepto').");
-
-            int cCuenta = FindHeaderCol(ws, headerRow, "Cuenta");
-            int cConcepto = FindHeaderCol(ws, headerRow, "Concepto");
-
-            // Importes: prioriza HABER; si no hay, busca IMPORTE; si tampoco, usa DEBE (con signo positivo)
-            int cHaber = FindHeaderCol(ws, headerRow, "Haber");
-            int cImporte = FindHeaderCol(ws, headerRow, "Importe");
-            int cDebe = FindHeaderCol(ws, headerRow, "Debe");
-
-            if (cCuenta == 0 || cConcepto == 0)
-                return await Bad(req, "Faltan columnas obligatorias: 'Cuenta' y/o 'Concepto'.");
-
-            int lastRow = ws.LastRowUsed()?.RowNumber() ?? headerRow;
-            var agregados = new Dictionary<(string Cuenta, string Concepto), decimal>();
-
-            for (int r = headerRow + 1; r <= lastRow; r++)
+            // Reenviar al servicio Python copiando el body en memoria
+            byte[] bodyBytes;
+            using (var ms = new MemoryStream())
             {
-                var cuenta = ws.Cell(r, cCuenta).GetString().Trim();
-                var concepto = ws.Cell(r, cConcepto).GetString().Trim();
-
-                if (string.IsNullOrWhiteSpace(cuenta) && string.IsNullOrWhiteSpace(concepto)) continue;
-
-                decimal importe = 0m;
-                if (cHaber > 0)
-                    importe = SafeNumber(ws.Cell(r, cHaber).Value);
-                else if (cImporte > 0)
-                    importe = SafeNumber(ws.Cell(r, cImporte).Value);
-                else if (cDebe > 0)
-                    importe = SafeNumber(ws.Cell(r, cDebe).Value);
-                else
-                    continue; // no hay importe utilizable
-
-                var key = (Cuenta: cuenta, Concepto: concepto);
-                if (agregados.TryGetValue(key, out var acc))
-                    agregados[key] = acc + importe;
-                else
-                    agregados[key] = importe;
+                await req.Body.CopyToAsync(ms);
+                bodyBytes = ms.ToArray();
             }
 
-            // Crear/limpiar hoja "Desglose"
-            var wsOut = wb.Worksheets.FirstOrDefault(s => s.Name.Equals("Desglose", StringComparison.OrdinalIgnoreCase));
-            if (wsOut != null) wsOut.Delete();
-            wsOut = wb.Worksheets.Add("Desglose");
+            if (bodyBytes.Length == 0)
+                return await Bad(req, "Body vacío recibido en Function.");
 
-            // Escribir tabla
-            int row = 1;
-            wsOut.Cell(row, 1).Value = "Cuenta";
-            wsOut.Cell(row, 2).Value = "Concepto";
-            wsOut.Cell(row, 3).Value = "Importe";
-            wsOut.Range(row, 1, row, 3).Style.Font.Bold = true;
-            row++;
-
-            foreach (var kv in agregados.OrderBy(k => k.Key.Cuenta).ThenBy(k => k.Key.Concepto))
+            var forward = new HttpRequestMessage(HttpMethod.Post, PdfServiceUrl)
             {
-                wsOut.Cell(row, 1).Value = kv.Key.Cuenta;
-                wsOut.Cell(row, 2).Value = kv.Key.Concepto;
-                wsOut.Cell(row, 3).Value = kv.Value;
-                row++;
+                Content = new ByteArrayContent(bodyBytes)
+            };
+            forward.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(ct);
+
+
+            // Copiar cabeceras útiles (por ejemplo X-File-Name)
+            foreach (var h in req.Headers)
+            {
+                if (h.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase) ||
+                    h.Key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var value = string.Join(",", h.Value);
+
+                if (!forward.Headers.TryAddWithoutValidation(h.Key, value))
+                {
+                    forward.Content.Headers.TryAddWithoutValidation(h.Key, value);
+                }
             }
 
-            // Total al final
-            wsOut.Cell(row, 2).Value = "Total";
-            wsOut.Cell(row, 2).Style.Font.Bold = true;
-            wsOut.Cell(row, 3).FormulaA1 = $"SUM(C2:C{row - 1})";
-            wsOut.Cell(row, 3).Style.NumberFormat.Format = "#,##0.00 [$€-es-ES]";
-            wsOut.Columns("A:C").AdjustToContents();
 
-            // ========= Vista previa (primeras 20 filas) =========
-            var preview = agregados.Take(20).Select(kv => new
+            using var pyResp = await Http.SendAsync(forward);
+
+            // Crear respuesta hacia Blazor con mismo status code
+            var resp = req.CreateResponse(pyResp.StatusCode);
+
+            // Copiar cabeceras de la respuesta de Python (incluye X-Preview, Content-Disposition, etc.)
+            foreach (var h in pyResp.Headers)
+                resp.Headers.Add(h.Key, string.Join(",", h.Value));
+
+            if (pyResp.Content != null)
             {
-                Cuenta = kv.Key.Cuenta,
-                Concepto = kv.Key.Concepto,
-                Importe = Math.Round(kv.Value, 2)
-            }).ToList();
+                foreach (var h in pyResp.Content.Headers)
+                    resp.Headers.Add(h.Key, string.Join(",", h.Value));
 
-            // Respuesta
-            var resp = req.CreateResponse(HttpStatusCode.OK);
-            resp.Headers.Add("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+                var bytes = await pyResp.Content.ReadAsByteArrayAsync();
+                await resp.WriteBytesAsync(bytes);
+            }
 
-            var baseName = Path.GetFileNameWithoutExtension(fileName);
-            var outName = $"Desglose_{(string.IsNullOrWhiteSpace(baseName) ? "archivo" : baseName)}.xlsx";
-            resp.Headers.Add("Content-Disposition",
-                $"attachment; filename=\"{outName}\"; filename*=UTF-8''{Uri.EscapeDataString(outName)}");
-            resp.Headers.Add("X-Preview", JsonSerializer.Serialize(new { Lineas = preview }));
-
-            using var outMs = new MemoryStream();
-            wb.SaveAs(outMs);
-            await resp.WriteBytesAsync(outMs.ToArray());
             Function1.AddCors(resp, req);
             return resp;
         }
         catch (Exception ex)
         {
             var err = req.CreateResponse(HttpStatusCode.InternalServerError);
-            await err.WriteStringAsync($"Error procesando Excel (Desglose): {ex.Message}");
+            await err.WriteStringAsync($"Error reenviando a pdf-service: {ex.Message}");
             Function1.AddCors(err, req);
             return err;
         }
+    }
 
-        // ==== helpers locales ====
-        static async Task<HttpResponseData> Bad(HttpRequestData req, string msg)
-        {
-            var bad = req.CreateResponse(HttpStatusCode.BadRequest);
-            await bad.WriteStringAsync(msg);
-            Function1.AddCors(bad, req);
-            return bad;
-        }
-
-        static int FindHeaderRow(IXLWorksheet ws, IEnumerable<string> mustHave, int maxScan = 60)
-        {
-            for (int r = 1; r <= maxScan; r++)
-            {
-                bool ok = true;
-                foreach (var h in mustHave)
-                    if (FindHeaderCol(ws, r, h) == 0) { ok = false; break; }
-                if (ok) return r;
-            }
-            return 0;
-        }
-
-        static int FindHeaderCol(IXLWorksheet ws, int headerRow, string headerName)
-        {
-            int lastCol = ws.LastColumnUsed()?.ColumnNumber() ?? 0;
-            for (int c = 1; c <= lastCol; c++)
-            {
-                var s = ws.Cell(headerRow, c).GetString().Trim();
-                if (string.Equals(s, headerName, StringComparison.OrdinalIgnoreCase))
-                    return c;
-            }
-            return 0;
-        }
-
-        static decimal SafeNumber(object v)
-        {
-            if (v is null) return 0m;
-            if (v is double d) return (decimal)d;
-            if (v is float f) return (decimal)f;
-            if (v is decimal m) return m;
-            if (v is int i) return i;
-            if (v is long l) return l;
-
-            var s = Convert.ToString(v) ?? string.Empty;
-            s = s.Replace(" ", "").Replace(".", "").Replace(",", ".");
-            return decimal.TryParse(s, System.Globalization.NumberStyles.Any,
-                                    System.Globalization.CultureInfo.InvariantCulture, out var res)
-                ? res : 0m;
-        }
+    private static async Task<HttpResponseData> Bad(HttpRequestData req, string msg)
+    {
+        var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+        await bad.WriteStringAsync(msg);
+        Function1.AddCors(bad, req);
+        return bad;
     }
 }

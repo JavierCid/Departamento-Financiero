@@ -1,6 +1,9 @@
-﻿@page "/desglose-facturas"
+﻿@page "/procesar-pdfs"
+@page "/desglose-facturas"
 @inject HttpClient Http
 @inject IJSRuntime JS
+@using System.Net.Http
+@using System.Net.Http.Headers
 
 <div class="df-container">
 
@@ -19,7 +22,10 @@
             <button type="button" class="btn btn-ghost df-filebtn">
                 Seleccionar facturas (PDF)
             </button>
-            <InputFile OnChange="OnFileSelected" accept=".pdf" />
+
+            <InputFile OnChange="OnFileSelected" accept=".pdf" multiple />
+
+
         </div>
 
         <button class="btn btn-primary" @onclick="Upload" disabled="@(!canSend || busy)">
@@ -34,7 +40,9 @@
          @ondragleave="() => SetDrag(false)"
          @ondrop="() => SetDrag(false)">
 
-        <InputFile class="df-drop__input" OnChange="OnFileSelected" accept=".pdf" />
+        <InputFile class="df-drop__input" OnChange="OnFileSelected" accept=".pdf" multiple />
+
+
 
         <div class="df-drop__icon">
             <i class="bi bi-file-earmark-pdf"></i>
@@ -43,11 +51,19 @@
         <div class="df-drop__hint">…o usa “Seleccionar facturas (PDF)”</div>
     </div>
 
-    <!-- Nombre del archivo -->
-    @if (file is not null)
+    <!-- Lista de PDFs seleccionados -->
+    @if (files.Count > 0)
     {
         <div class="df-files">
-            <div class="item">@file.Name</div>
+            <div class="item">
+                <strong>PDFs cargados:</strong> @files.Count archivo(s)
+            </div>
+            <ul class="df-list">
+                @foreach (var f in files)
+                {
+                    <li>@f.Name</li>
+                }
+            </ul>
         </div>
     }
 
@@ -61,7 +77,7 @@
         <div class="alert alert-danger mt-2">@errMsg</div>
     }
 
-    <!-- Vista previa (mismo modelo que antes, pero con tus estilos df-preview) -->
+    <!-- Vista previa -->
     @if (preview?.Lineas?.Count > 0)
     {
         <div class="df-preview card df-card p-3 mt-3">
@@ -93,12 +109,11 @@
 @code
 {
     // ===== Estado UI =====
-    IBrowserFile? file;
+    List<IBrowserFile> files = new();
     bool busy;
-    bool canSend => file is not null;
+    bool canSend => files.Count > 0;
     string? okMsg;
     string? errMsg;
-
     bool drag;
 
     // ===== Modelo de vista previa (de X-Preview) =====
@@ -108,6 +123,7 @@
     {
         public List<PreviewLine>? Lineas { get; set; }
     }
+
     sealed class PreviewLine
     {
         public string Cuenta { get; set; } = "";
@@ -117,7 +133,9 @@
 
     void OnFileSelected(InputFileChangeEventArgs e)
     {
-        file = e.File;
+        const int MaxPdfs = 50; // límite de PDFs
+        files = e.GetMultipleFiles(MaxPdfs).ToList();
+
         okMsg = errMsg = null;
         preview = null;
         StateHasChanged();
@@ -127,30 +145,34 @@
 
     async Task Upload()
     {
-        if (file is null) return;
+        if (files.Count == 0) return;
 
         okMsg = errMsg = null;
         preview = null;
         busy = true;
+
         try
         {
-            // 1) Leer bytes del archivo
-            using var ms = new MemoryStream();
-            await file.OpenReadStream(long.MaxValue).CopyToAsync(ms);
-            var bytes = ms.ToArray();
+            // 1) Preparar multipart/form-data con TODOS los PDFs seleccionados
+            var url = "http://localhost:7071/api/DesglosarFacturas";
 
-            // 2) Preparar petición → Function: /api/DesglosarFacturas (HTTP en local)
-            var url = "http://localhost:7127/api/DesglosarFacturas";
-            using var req = new HttpRequestMessage(HttpMethod.Post, url);
-            var content = new ByteArrayContent(bytes);
-            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
-            req.Content = content;
-            req.Headers.TryAddWithoutValidation("X-File-Name", file.Name);
+            using var form = new System.Net.Http.MultipartFormDataContent();
 
-            // 3) Enviar
-            using var resp = await Http.SendAsync(req);
+            foreach (var f in files)
+            {
+                // No usar "using" aquí: el stream debe vivir hasta que se envíe la petición
+                var stream = f.OpenReadStream(long.MaxValue);
+                var fileContent = new System.Net.Http.StreamContent(stream);
+                fileContent.Headers.ContentType =
+                    new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
 
-            // 4) Procesar respuesta
+                // Campo "files" → es el que espera FastAPI (pdf2excel)
+                form.Add(fileContent, "files", f.Name);
+            }
+
+            using var resp = await Http.PostAsync(url, form);
+
+            // 2) Procesar respuesta
             if (!resp.IsSuccessStatusCode)
             {
                 var msg = await resp.Content.ReadAsStringAsync();
@@ -158,25 +180,31 @@
                 return;
             }
 
-            // Vista previa desde cabecera X-Preview (si viene)
+            // 3) Vista previa desde cabecera X-Preview (si viene)
             if (resp.Headers.TryGetValues("X-Preview", out var vals))
             {
                 var json = vals.FirstOrDefault();
                 if (!string.IsNullOrWhiteSpace(json))
                 {
-                    preview = System.Text.Json.JsonSerializer.Deserialize<PreviewDto>(json,
-                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    preview = System.Text.Json.JsonSerializer.Deserialize<PreviewDto>(
+                        json,
+                        new System.Text.Json.JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        });
                 }
             }
 
-            // 5) Descargar el Excel resultante
+            // 4) Descargar el Excel resultante
             var outBytes = await resp.Content.ReadAsByteArrayAsync();
-            var outName = GetFileNameFromContentDisposition(resp) ?? $"Desglose_{System.IO.Path.GetFileName(file.Name)}";
+            var outName = GetFileNameFromContentDisposition(resp)
+                          ?? "Facturas_procesadas.xlsx";
             var base64 = Convert.ToBase64String(outBytes);
             await JS.InvokeVoidAsync("downloadFileFromBytes", outName, base64);
 
             okMsg = "Archivo procesado correctamente.";
         }
+
         catch (Exception ex)
         {
             errMsg = $"Error subiendo el archivo: {ex.Message}";
@@ -187,10 +215,13 @@
         }
     }
 
+
+
     static string? GetFileNameFromContentDisposition(HttpResponseMessage resp)
     {
         // Soporta filename y filename* (UTF-8)
-        if (resp.Content.Headers.ContentDisposition?.FileNameStar is string star && !string.IsNullOrWhiteSpace(star))
+        if (resp.Content.Headers.ContentDisposition?.FileNameStar is string star &&
+            !string.IsNullOrWhiteSpace(star))
         {
             try
             {

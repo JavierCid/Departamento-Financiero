@@ -11,15 +11,14 @@
 
 <div class="prinex-head">
     <h3>Contraste contabilidad ↔ Prinex</h3>
-
-
     <img class="prinex-logo" src="/Images/prinex_logo.png" alt="Prinex" />
 </div>
 
 <div class="prinex-desc">
     Cruza los datos de facturación de Prinex con los importes registrados en el libro mayor
 </div>
-<!-- Uploader unificado (mismo look que Procesar facturas) -->
+
+<!-- Uploader unificado -->
 <div class="df-uploader">
     <div class="df-filepick">
         <button type="button" class="btn btn-ghost df-filebtn">Seleccionar archivo (Excel)</button>
@@ -38,16 +37,14 @@
                 <input type="number" min="2000" max="2100" @bind="_anio" class="form-control text-center" />
             </div>
         </div>
-
     </div>
 
     <button class="btn btn-primary" @onclick="Procesar" disabled="@(!_canSend || _busy)">
         @(_busy ? "Procesando..." : "Procesar")
     </button>
-
 </div>
 
-<!-- Dropzone elegante (look BankFlow Pro) -->
+<!-- Dropzone -->
 <div class="@($"df-drop df-drop--hero{(_drag ? " drag" : "")}")"
      @ondragover:preventDefault
      @ondragenter="() => SetDrag(true)"
@@ -62,21 +59,27 @@
     <div class="df-drop__hint">…o usa “Seleccionar archivo (Excel)”</div>
 </div>
 
-<!-- Nombre del archivo seleccionado -->
-@if (_selectedFile is not null)
+<!-- Estado archivo + mensajes (mismo look que cuadrepdfprinex) -->
+@if (_selectedFile is not null || !string.IsNullOrWhiteSpace(_success) || !string.IsNullOrWhiteSpace(_error))
 {
-    <div class="df-files">
-        <div class="item">@_selectedFile.Name</div>
-    </div>
-}
+    <div class="df-status df-card card p-3 mt-3">
 
-@if (!string.IsNullOrWhiteSpace(_success))
-{
-    <div class="alert alert-success mt-2">@_success</div>
-}
-@if (!string.IsNullOrWhiteSpace(_error))
-{
-    <div class="alert alert-danger mt-2">@_error</div>
+        <div class="df-files text-muted">
+            @if (_selectedFile is not null)
+            {
+                <div><strong>Excel:</strong> @_selectedFile.Name</div>
+            }
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="alert alert-danger py-2 mt-3 mb-0">@_error</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(_success))
+        {
+            <div class="alert alert-success py-2 mt-3 mb-0">@_success</div>
+        }
+    </div>
 }
 
 @if (_preview is not null)
@@ -85,11 +88,13 @@
     var model = _preview!;
 
     <div class="df-preview card df-card p-3 mt-3">
-        <h5 class="mb-3">Resumen de comparación</h5>
+        <h5 class="mb-2">Resumen de comparación</h5>
 
-        <h6 class="mb-2">
-            Faltantes (@(model.Faltantes?.Count ?? 0))
-        </h6>
+        <!-- Faltantes -->
+        <h6>⚠️ En Prinex pero NO en contabilidad (@(model.Faltantes?.Count ?? 0))</h6>
+        <p class="df-section-subtitle">
+            Facturas que aparecen como pendientes en Prinex pero no figuran en el libro mayor.
+        </p>
 
         <table class="table table-sm table-striped table-hover" style="font-size:.85rem">
             <thead>
@@ -109,9 +114,12 @@
             </tbody>
         </table>
 
-        <h6 class="mt-3 mb-2">
-            Descuadres (@(model.Descuadres?.Count ?? 0))
-        </h6>
+        <!-- Descuadres -->
+        <h6 class="mt-3">❌ Descuadres (@(model.Descuadres?.Count ?? 0))</h6>
+
+        <p class="df-section-subtitle">
+            Facturas presentes en Prinex y en el libro mayor, pero con importes distintos.
+        </p>
 
         <table class="table table-sm table-striped table-hover" style="font-size:.85rem">
             <thead>
@@ -135,11 +143,14 @@
             </tbody>
         </table>
 
+        <!-- En MAYORES pero NO en Prinex -->
         @if (model.FaltantesInverso is not null)
         {
-            <h6 class="mt-3 mb-2">
-                En Mayores y no en Prinex (@model.FaltantesInverso.Count)
-            </h6>
+            <h6 class="mt-3">📒 En contabilidad pero NO en Prinex (@model.FaltantesInverso.Count)</h6>
+
+            <p class="df-section-subtitle">
+                Apuntes en contabilidad que no tienen factura pendiente asociada en Prinex.
+            </p>
 
             <table class="table table-sm table-striped table-hover" style="font-size:.85rem">
                 <thead>
@@ -216,16 +227,13 @@
 
             using var content = new ByteArrayContent(bytes);
             content.Headers.ContentType = new MediaTypeHeaderValue(
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
             content.Headers.Add("X-File-Name", _selectedFile.Name);
 
             string apiUrl = $"http://localhost:7071/api/ProcesarExcel?mes={_mes}&anio={_anio}";
 
-
-
             var resp = await Http.PostAsync(apiUrl, content);
-
 
             if (!resp.IsSuccessStatusCode)
             {
@@ -257,7 +265,6 @@
         {
             _error = ex.Message;
         }
-
         finally
         {
             _busy = false;
@@ -299,7 +306,6 @@
         public List<Faltante>? Faltantes { get; set; }
         public List<Descuadre>? Descuadres { get; set; }
         public List<FaltanteInv>? FaltantesInverso { get; set; }
-
     }
 
     private class Faltante
@@ -307,6 +313,7 @@
         public string Factura { get; set; } = "";
         public double Importe { get; set; }
     }
+
     private class FaltanteInv
     {
         public string Factura { get; set; } = "";
@@ -327,4 +334,59 @@
         color: #b00000;
         font-weight: 600;
     }
+
+    /* Bloque Excel + mensajes (mismo look que cuadrepdfprinex) */
+    .df-status {
+        margin-top: 1.5rem;
+        background: #0f172a;
+        border-radius: 0.75rem;
+        border: 1px solid #1f2937;
+        font-size: 0.9rem;
+    }
+
+        .df-status .df-files {
+            margin-top: 0.5rem;
+        }
+
+            .df-status .df-files div + div {
+                margin-top: 0.15rem;
+            }
+
+        .df-status .alert {
+            margin-top: 0.6rem;
+            margin-bottom: 0;
+            padding: 0.35rem 0.9rem;
+            border-radius: 999px;
+            display: inline-block;
+            font-size: 0.85rem;
+        }
+
+    /* Tarjeta resumen */
+    .df-preview {
+        margin-top: 0.9rem;
+    }
+
+        .df-preview h5 {
+            margin-top: 0;
+            margin-bottom: 0.35rem;
+        }
+
+        .df-preview h6 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.15rem;
+        }
+
+    .df-section-subtitle {
+        font-size: 0.85rem;
+        color: #9ca3af;
+        margin-top: 0.35rem; /* un pelín más separado del título */
+        margin-bottom: 0.6rem; /* menos margen colapsado con la tabla */
+    }
+    /* Margen extra entre subtítulo y tabla de resultados */
+    .df-preview table {
+        margin-top: 0.55rem;
+    }
+
+
 </style>
