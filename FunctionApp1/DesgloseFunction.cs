@@ -47,7 +47,7 @@ public class DesgloseFunction
             if (string.IsNullOrWhiteSpace(ct))
                 return await Bad(req, "Content-Type vacío.");
 
-            // Reenviar al servicio Python copiando el body en memoria
+            // Reenviar al servicio Python copiando el body en memoria (proxy simple)
             byte[] bodyBytes;
             using (var ms = new MemoryStream())
             {
@@ -64,36 +64,36 @@ public class DesgloseFunction
             };
             forward.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(ct);
 
-
-            // Copiar cabeceras útiles (por ejemplo X-File-Name)
-            foreach (var h in req.Headers)
+            // Cabecera opcional con el nombre del archivo (si viene)
+            if (req.Headers.TryGetValues("X-File-Name", out var xFileVals))
             {
-                if (h.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase) ||
-                    h.Key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                var value = string.Join(",", h.Value);
-
-                if (!forward.Headers.TryAddWithoutValidation(h.Key, value))
-                {
-                    forward.Content.Headers.TryAddWithoutValidation(h.Key, value);
-                }
+                forward.Headers.TryAddWithoutValidation("X-File-Name", string.Join(",", xFileVals));
             }
-
 
             using var pyResp = await Http.SendAsync(forward);
 
             // Crear respuesta hacia Blazor con mismo status code
             var resp = req.CreateResponse(pyResp.StatusCode);
 
-            // Copiar cabeceras de la respuesta de Python (incluye X-Preview, Content-Disposition, etc.)
-            foreach (var h in pyResp.Headers)
-                resp.Headers.Add(h.Key, string.Join(",", h.Value));
+            // X-Preview (cabecera normal desde FastAPI)
+            if (pyResp.Headers.TryGetValues("X-Preview", out var previewVals))
+            {
+                resp.Headers.Add("X-Preview", string.Join(",", previewVals));
+            }
 
             if (pyResp.Content != null)
             {
-                foreach (var h in pyResp.Content.Headers)
-                    resp.Headers.Add(h.Key, string.Join(",", h.Value));
+                // Content-Type (Excel)
+                if (pyResp.Content.Headers.ContentType is not null)
+                {
+                    resp.Headers.Add("Content-Type", pyResp.Content.Headers.ContentType.ToString());
+                }
+
+                // Content-Disposition (nombre del fichero)
+                if (pyResp.Content.Headers.ContentDisposition is not null)
+                {
+                    resp.Headers.Add("Content-Disposition", pyResp.Content.Headers.ContentDisposition.ToString());
+                }
 
                 var bytes = await pyResp.Content.ReadAsByteArrayAsync();
                 await resp.WriteBytesAsync(bytes);
@@ -101,6 +101,7 @@ public class DesgloseFunction
 
             Function1.AddCors(resp, req);
             return resp;
+
         }
         catch (Exception ex)
         {

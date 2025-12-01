@@ -1,0 +1,259 @@
+﻿@page "/procesar-pdfs"
+
+<h1 style="color:white">TEST /procesar-pdfs</h1>
+
+@using Microsoft.AspNetCore.Components.Forms
+
+@using Microsoft.AspNetCore.Components.Web
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<div class="page-procesar">
+    <div class="pdf-head">
+        <h3>Procesador de facturas</h3>
+        <img class="pdf-logo" src="/Images/pdf_logo.png" alt="PDFFlow" />
+    </div>
+
+    <div class="pdf-desc">
+        Desglose de facturas y extracción automática del contenido en formato estructurado
+    </div>
+    <!-- el resto de la página (uploader, dropzone, etc.) -->
+</div>
+
+
+<div class="df-uploader">
+    <div class="df-filepick">
+        <button type="button" class="btn btn-ghost df-filebtn">Seleccionar archivos (PDF)</button>
+        <InputFile OnChange="OnFilesSelected" multiple accept=".pdf" />
+    </div>
+
+    <button class="btn btn-primary" @onclick="Enviar" disabled="@(!_canSend || _busy)">
+        @(_busy ? "Procesando..." : "Procesar")
+    </button>
+
+    
+</div>
+<!-- Dropzone elegante (look BankFlow Pro) con área clicable completa -->
+<div class="@($"df-drop df-drop--hero{(_drag ? " drag" : "")}")"
+     @ondragover:preventDefault
+     @ondrop:preventDefault
+     @ondragenter="() => SetDrag(true)"
+     @ondragleave="() => SetDrag(false)"
+     @ondrop="() => SetDrag(false)">
+
+
+    <InputFile class="df-drop__input" OnChange="OnFilesSelected" multiple accept=".pdf" />
+
+    <div class="df-drop__icon"><i class="bi bi-filetype-pdf"></i></div>
+    <div class="df-drop__title">Arrastra aquí tus facturas</div>
+    <div class="df-drop__hint">…o usa “Seleccionar archivos (PDF)”</div>
+</div>
+
+@if (_files.Count > 0)
+{
+    <div class="df-files">
+        <div><strong>@_files.Count</strong> archivo(s) seleccionado(s)</div>
+        <div class="small text-muted">
+            @foreach (var f in _files.Take(4))
+            {
+                <div class="item">@f.Name</div>
+            }
+            @if (_files.Count > 4)
+            {
+                <div class="item">… y @(_files.Count - 4) más</div>
+            }
+        </div>
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(_ok))
+{
+    <div class="alert alert-success py-2 mt-3">@_ok</div>
+}
+@if (!string.IsNullOrWhiteSpace(_err))
+{
+    <div class="alert alert-danger py-2 mt-3">@_err</div>
+}
+
+@if (_preview is not null && _preview.Muestra.Count > 0)
+{
+    <div class="df-preview card df-card p-3 mt-3">
+        <h5 class="mb-3">Vista previa</h5>
+        <table class="table table-sm table-striped table-hover" style="font-size:.95rem">
+            <thead class="table-primary">
+                <tr>
+                    <th>Archivo</th>
+                    <th>Proveedor</th>
+                    <th>Fecha</th>
+                    <th>Invoice</th>
+                    <th>Concepto</th>
+                    <th class="text-end">Total Neto</th>
+                    <th class="text-end">IVA €</th>
+                    <th class="text-end">IRPF</th>
+                    <th class="text-end">Total Bruto</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _preview.Muestra)
+                {
+                    <tr>
+                        <td><span title="@r.Archivo">@Trunc(r.Archivo, 27)</span></td>
+                        <td><span title="@r.Proveedor">@Trunc(r.Proveedor, 27)</span></td>
+                        <td>@r.Fecha</td>
+                        <td>@r.Invoice</td>
+                        <td>@r.Concepto</td>
+                        <td class="text-end">@r.TotalNeto</td>
+                        <td class="text-end">@r.IVA</td>
+                        <td class="text-end">@r.IRPF</td>
+                        <td class="text-end fw-semibold">@r.TotalBruto</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <div class="text-muted small">Mostrando @Math.Min(_preview.Muestra.Count, 50) de @_preview.Filas filas.</div>
+    </div>
+}
+else if (!string.IsNullOrWhiteSpace(_previewJson))
+{
+    <h6 class="text-muted mt-3">Vista previa (modo texto)</h6>
+    <pre style="white-space:pre-wrap">@_previewJson</pre>
+}
+
+@code {
+    // ---- Drag state para el dropzone ----
+    bool _drag = false;
+    
+    void SetDrag(bool v) => _drag = v;
+
+    // -------- Config --------
+    const string EndpointPdf = "http://127.0.0.1:8000/api/pdf2excel";
+
+    // -------- Estado --------
+    List<IBrowserFile> _files = new();
+    bool _busy;
+    bool _canSend => _files.Count > 0;
+    string? _ok, _err, _previewJson;
+    PreviewDto? _preview;
+
+    // -------- Selección de archivos --------
+    void OnFilesSelected(InputFileChangeEventArgs e)
+    {
+        var picked = e.GetMultipleFiles();
+        if (picked is null || picked.Count == 0) return;
+
+        foreach (var f in picked) _files.Add(f);
+        _ok = _err = _previewJson = null;
+        _preview = null;
+    }
+
+    // -------- Envío --------
+    async Task Enviar()
+    {
+        if (_files.Count == 0) return;
+        _busy = true; _ok = _err = _previewJson = null; _preview = null;
+
+        try
+        {
+            using var form = new MultipartFormDataContent();
+            foreach (var f in _files)
+            {
+                using var ms = new MemoryStream();
+                await f.OpenReadStream(long.MaxValue).CopyToAsync(ms);
+                var bytes = new ByteArrayContent(ms.ToArray());
+                bytes.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+                form.Add(bytes, "file", f.Name);
+            }
+            form.Headers.Add("X-Client", "Departamento-Financiero");
+
+            var req = new HttpRequestMessage(HttpMethod.Post, EndpointPdf) { Content = form };
+            req.Headers.Add("Accept", "application/json, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            var resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                _err = $"Error {(int)resp.StatusCode}: " + await resp.Content.ReadAsStringAsync();
+                return;
+            }
+
+            // Vista previa desde cabecera X-Preview (si tu API la envía)
+            if (resp.Headers.TryGetValues("X-Preview", out var vals))
+                _previewJson = vals.FirstOrDefault();
+
+            ParsePreviewIfAny();
+
+            // Descarga Excel
+            var bytesOut = await resp.Content.ReadAsByteArrayAsync();
+            var fileName = ExtraerNombreDescarga(resp) ?? "resultado.xlsx";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, Convert.ToBase64String(bytesOut));
+
+            _ok = "Procesamiento exitoso";
+            _files.Clear();
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally { _busy = false; }
+    }
+
+    // -------- Utilidades --------
+    static string? ExtraerNombreDescarga(HttpResponseMessage resp)
+    {
+        var cd = resp.Content.Headers.ContentDisposition;
+        if (cd?.FileNameStar is not null) return Uri.UnescapeDataString(cd.FileNameStar);
+        if (cd?.FileName is not null) return cd.FileName.Trim('"');
+        return null;
+    }
+
+    static string Trunc(string? s, int max) =>
+        string.IsNullOrEmpty(s) ? "" : (s.Length <= max ? s : s.Substring(0, Math.Max(0, max - 3)) + "...");
+
+    // -------- Modelos + parseo X-Preview --------
+    public class PreviewDto
+    {
+        public int Filas { get; set; }
+        public List<Item> Muestra { get; set; } = new();
+
+        public class Item
+        {
+            public string? Archivo { get; set; }
+            public string? OCR { get; set; }
+            public string? Proveedor { get; set; }
+            public string? Fecha { get; set; }
+            public string? Invoice { get; set; }
+            public string? Concepto { get; set; }
+            public string? TotalNeto { get; set; }
+            public string? IVA { get; set; }
+            public string? IRPF { get; set; }
+            public string? TotalBruto { get; set; }
+        }
+    }
+
+    void ParsePreviewIfAny()
+    {
+        if (string.IsNullOrWhiteSpace(_previewJson)) { _preview = null; return; }
+
+        using var doc = System.Text.Json.JsonDocument.Parse(_previewJson);
+        var root = doc.RootElement;
+
+        var dto = new PreviewDto { Filas = root.GetProperty("Filas").GetInt32() };
+        foreach (var e in root.GetProperty("Muestra").EnumerateArray())
+        {
+            dto.Muestra.Add(new PreviewDto.Item
+            {
+                Archivo = e.TryGetProperty("Archivo", out var v0) ? v0.GetString() : null,
+                OCR = e.TryGetProperty("OCR", out var v1) ? v1.GetString() : null,
+                Proveedor = e.TryGetProperty("Proveedor", out var v2) ? v2.GetString() : null,
+                Fecha = e.TryGetProperty("Fecha", out var v3) ? v3.GetString() : null,
+                Invoice = e.TryGetProperty("Invoice", out var v4) ? v4.GetString() : null,
+                Concepto = e.TryGetProperty("Concepto", out var v5) ? v5.GetString() : null,
+                TotalNeto = e.TryGetProperty("Total Neto", out var v6) ? v6.GetString() : null,
+                IVA = e.TryGetProperty("IVA €", out var v7) ? v7.GetString() : null,
+                IRPF = e.TryGetProperty("IRPF", out var v8) ? v8.GetString() : null,
+                TotalBruto = e.TryGetProperty("Total Bruto", out var v9) ? v9.GetString() : null,
+            });
+        }
+        _preview = dto;
+    }
+}

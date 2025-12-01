@@ -364,13 +364,17 @@ async def pdf2excel(
         raise HTTPException(status_code=400, detail="Sube al menos un PDF")
 
     dfs: List[pd.DataFrame] = []
+    errores: List[str] = []
+
     for f in uploads:
         if not f.filename.lower().endswith(".pdf"):
-            raise HTTPException(status_code=400, detail=f"'{f.filename}' no es un PDF")
+            errores.append(f"'{f.filename}' no es un PDF")
+            continue
 
         contenido = await f.read()
         if not contenido:
-            raise HTTPException(status_code=400, detail=f"'{f.filename}' está vacío")
+            errores.append(f"'{f.filename}' está vacío")
+            continue
 
         try:
             df = parse_pdf_to_df(contenido, f.filename)
@@ -378,9 +382,17 @@ async def pdf2excel(
             df["ArchivoPreview"] = _short_name(f.filename, 27)
             dfs.append(df)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error leyendo '{f.filename}': {e}")
+            errores.append(f"Error leyendo '{f.filename}': {e}")
+
+    if not dfs:
+        # Ningún PDF se pudo procesar
+        detalle = "No se pudo procesar ningún PDF."
+        if errores:
+            detalle += " " + " | ".join(errores)
+        raise HTTPException(status_code=500, detail=detalle)
 
     df_total = pd.concat(dfs, ignore_index=True) if len(dfs) > 1 else dfs[0]
+
 
     # ===== Generar Excel (igual que antes) =====
     out = io.BytesIO()
@@ -438,7 +450,7 @@ async def pdf2excel(
 
     xlsx_bytes = out.getvalue()
 
-    # ===== Vista previa para DesglosarFacturas (Cuenta / Concepto / Importe) =====
+    # ===== Vista previa para DesglosarFacturas (Cuenta / Concepto / Neto / IVA / IRPF / Bruto) =====
     lineas = []
     for _, r in df_total.head(200).iterrows():
         cuenta = str(r.get("Proveedor") or "").strip()
@@ -449,17 +461,46 @@ async def pdf2excel(
         if len(concepto) > 80:
             concepto = concepto[:80] + "…"
 
-        bruto_val = r.get("Importe Bruto") or r.get("Neto") or 0
-        if isinstance(bruto_val, (int, float)):
-            importe = float(bruto_val)
-        else:
-            importe = _to_float_eu(bruto_val) or 0.0
+        def _num(col):
+            v = r.get(col)
+
+            # Tratar None / "" / NaN como 0.0
+            if v is None:
+                return 0.0
+            if isinstance(v, str):
+                if not v.strip():
+                    return 0.0
+                num = _to_float_eu(v) or 0.0
+                # por si _to_float_eu devolviera NaN
+                return 0.0 if pd.isna(num) else float(num)
+
+            if pd.isna(v):
+                return 0.0
+
+            if isinstance(v, (int, float)):
+                return float(v)
+
+            num = _to_float_eu(v) or 0.0
+            return 0.0 if pd.isna(num) else float(num)
+
+        neto = _num("Neto")
+        iva = _num("IVA")
+        irpf = _num("IRPF")
+        bruto = _num("Importe Bruto")
+        if bruto == 0 and (neto != 0 or iva != 0 or irpf != 0):
+            bruto = neto + iva - irpf
 
         lineas.append({
-            "Cuenta": cuenta,
+            "Proveedor": cuenta,  # ← aquí ya usamos el proveedor
             "Concepto": concepto,
-            "Importe": round(importe, 2),
+            "Neto": round(neto, 2),
+            "IVA": round(iva, 2),
+            "IRPF": round(irpf, 2),
+            "ImporteBruto": round(bruto, 2),
         })
+
+
+
 
     # (Opcional) preview “clásico” por si lo quieres en otras pantallas
     preview_rows = []
@@ -482,6 +523,9 @@ async def pdf2excel(
         "Filas": int(len(df_total)),
         "Muestra": preview_rows,
     }
+    if errores:
+        preview["Errores"] = errores
+
 
     out_name = "Facturas procesadas.xlsx"
     content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

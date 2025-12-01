@@ -70,12 +70,13 @@
     <!-- Mensajes -->
     @if (!string.IsNullOrWhiteSpace(okMsg))
     {
-        <div class="alert alert-success mt-2">@okMsg</div>
+        <div class="alert alert-success df-alert">@okMsg</div>
     }
     @if (!string.IsNullOrWhiteSpace(errMsg))
     {
-        <div class="alert alert-danger mt-2">@errMsg</div>
+        <div class="alert alert-danger df-alert">@errMsg</div>
     }
+
 
     <!-- Vista previa -->
     @if (preview?.Lineas?.Count > 0)
@@ -86,19 +87,29 @@
             <table class="table table-sm table-striped table-hover mb-0">
                 <thead>
                     <tr>
-                        <th style="width: 140px;">Cuenta</th>
+                        <th style="width: 180px;">Proveedor</th>
                         <th>Concepto</th>
-                        <th style="width: 160px; text-align:right;">Importe</th>
+                        <th style="width: 130px; text-align:right;">Importe neto</th>
+                        <th style="width: 110px; text-align:right;">IVA</th>
+                        <th style="width: 110px; text-align:right;">IRPF</th>
+                        <th style="width: 130px; text-align:right;">Importe bruto</th>
                     </tr>
                 </thead>
+
                 <tbody>
                     @foreach (var l in preview!.Lineas!)
                     {
                         <tr>
-                            <td class="text-center">@l.Cuenta</td>
+                            <td class="text-center">@l.Proveedor</td>
+
                             <td>@l.Concepto</td>
-                            <td class="text-end">@l.Importe.ToString("N2")</td>
+                            <td class="text-end">@($"{l.Neto:N2} €")</td>
+                            <td class="text-end">@($"{l.IVA:N2} €")</td>
+                            <td class="text-end">@($"{l.IRPF:N2} €")</td>
+                            <td class="text-end">@($"{l.ImporteBruto:N2} €")</td>
+
                         </tr>
+
                     }
                 </tbody>
             </table>
@@ -122,14 +133,21 @@
     sealed class PreviewDto
     {
         public List<PreviewLine>? Lineas { get; set; }
+        // El resto de campos del JSON (Filas, Muestra, Errores) se ignoran si no los usamos
     }
 
     sealed class PreviewLine
     {
-        public string Cuenta { get; set; } = "";
-        public decimal Importe { get; set; }
+        public string Proveedor { get; set; } = "";
         public string Concepto { get; set; } = "";
+        public decimal Neto { get; set; }
+        public decimal IVA { get; set; }
+        public decimal IRPF { get; set; }
+        public decimal ImporteBruto { get; set; }
     }
+
+
+
 
     void OnFileSelected(InputFileChangeEventArgs e)
     {
@@ -150,33 +168,55 @@
         okMsg = errMsg = null;
         preview = null;
         busy = true;
+        StateHasChanged();
 
         try
         {
-            // 1) Preparar multipart/form-data con TODOS los PDFs seleccionados
-            var url = "http://localhost:7071/api/DesglosarFacturas";
+            Console.WriteLine($"[Desglose] Inicio Upload. PDFs={files.Count}");
 
-            using var form = new System.Net.Http.MultipartFormDataContent();
+            // 1) Preparar multipart/form-data con TODOS los PDFs seleccionados
+            var url = "http://127.0.0.1:8000/api/pdf2excel";
+
+            using var form = new MultipartFormDataContent();
 
             foreach (var f in files)
             {
-                // No usar "using" aquí: el stream debe vivir hasta que se envíe la petición
-                var stream = f.OpenReadStream(long.MaxValue);
-                var fileContent = new System.Net.Http.StreamContent(stream);
-                fileContent.Headers.ContentType =
-                    new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+                Console.WriteLine($"[Desglose] Añadiendo fichero: {f.Name}, size={f.Size}");
 
-                // Campo "files" → es el que espera FastAPI (pdf2excel)
+                // 1) Leer el PDF completo en memoria (nos quitamos de encima el stream remoto de Blazor)
+                await using var stream = f.OpenReadStream(long.MaxValue);
+                using var ms = new System.IO.MemoryStream();
+                await stream.CopyToAsync(ms);
+                var bytes = ms.ToArray();
+
+                // 2) Crear el contenido HTTP desde el byte[]
+                var fileContent = new ByteArrayContent(bytes);
+                fileContent.Headers.ContentType =
+                    new MediaTypeHeaderValue("application/pdf");
+
+                // 3) Campo "files" → es el que espera FastAPI (pdf2excel)
                 form.Add(fileContent, "files", f.Name);
             }
 
-            using var resp = await Http.PostAsync(url, form);
+            // HttpClient local, independiente de la inyección
+            using var client = new HttpClient
+            {
+                Timeout = TimeSpan.FromMinutes(10)
+            };
+
+            Console.WriteLine($"[Desglose] Enviando POST a {url}");
+
+            using var resp = await client.PostAsync(url, form);
+
+            Console.WriteLine($"[Desglose] Respuesta {(int)resp.StatusCode} {resp.StatusCode}");
+
 
             // 2) Procesar respuesta
             if (!resp.IsSuccessStatusCode)
             {
                 var msg = await resp.Content.ReadAsStringAsync();
                 errMsg = $"Error {((int)resp.StatusCode)}: {msg}";
+                Console.WriteLine($"[Desglose] Error respuesta: {errMsg}");
                 return;
             }
 
@@ -186,14 +226,26 @@
                 var json = vals.FirstOrDefault();
                 if (!string.IsNullOrWhiteSpace(json))
                 {
-                    preview = System.Text.Json.JsonSerializer.Deserialize<PreviewDto>(
-                        json,
-                        new System.Text.Json.JsonSerializerOptions
-                        {
-                            PropertyNameCaseInsensitive = true
-                        });
+                    try
+                    {
+                        preview = System.Text.Json.JsonSerializer.Deserialize<PreviewDto>(
+                            json,
+                            new System.Text.Json.JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true,
+                                NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString
+                            });
+                    }
+                    catch (System.Text.Json.JsonException ex)
+                    {
+                        // No rompas la subida: solo muestra el error y sigue.
+                        errMsg = $"Error leyendo vista previa: {ex.Message}";
+                        Console.WriteLine($"[Desglose] Error deserializando X-Preview: {ex.Message}");
+                        Console.WriteLine($"[Desglose] X-Preview bruto: {json}");
+                    }
                 }
             }
+
 
             // 4) Descargar el Excel resultante
             var outBytes = await resp.Content.ReadAsByteArrayAsync();
@@ -203,17 +255,20 @@
             await JS.InvokeVoidAsync("downloadFileFromBytes", outName, base64);
 
             okMsg = "Archivo procesado correctamente.";
+            Console.WriteLine("[Desglose] Upload completado OK.");
         }
-
         catch (Exception ex)
         {
-            errMsg = $"Error subiendo el archivo: {ex.Message}";
+            errMsg = $"Error subiendo el archivo: {ex.GetType().Name}: {ex.Message}";
+            Console.WriteLine($"[Desglose] EXCEPCIÓN en Upload: {ex}");
         }
         finally
         {
             busy = false;
+            StateHasChanged();
         }
     }
+
 
 
 
