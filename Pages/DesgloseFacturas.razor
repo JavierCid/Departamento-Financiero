@@ -1,9 +1,10 @@
 ﻿@page "/procesar-pdfs"
 @page "/desglose-facturas"
-@inject HttpClient Http
-@inject IJSRuntime JS
+@using Microsoft.AspNetCore.Components.Forms
 @using System.Net.Http
 @using System.Net.Http.Headers
+@inject HttpClient Http
+@inject IJSRuntime JS
 
 <div class="df-container">
 
@@ -24,8 +25,6 @@
             </button>
 
             <InputFile OnChange="OnFileSelected" accept=".pdf" multiple />
-
-
         </div>
 
         <button class="btn btn-primary" @onclick="Upload" disabled="@(!canSend || busy)">
@@ -41,8 +40,6 @@
          @ondrop="() => SetDrag(false)">
 
         <InputFile class="df-drop__input" OnChange="OnFileSelected" accept=".pdf" multiple />
-
-
 
         <div class="df-drop__icon">
             <i class="bi bi-file-earmark-pdf"></i>
@@ -77,48 +74,61 @@
         <div class="alert alert-danger df-alert">@errMsg</div>
     }
 
-
-    <!-- Vista previa -->
-    @if (preview?.Lineas?.Count > 0)
+    <!-- Vista previa tipo “antigua” (Muestra) -->
+    @if (preview is not null && preview.Muestra.Count > 0)
     {
         <div class="df-preview card df-card p-3 mt-3">
-            <h5>Vista previa (Desglose)</h5>
-
-            <table class="table table-sm table-striped table-hover mb-0">
-                <thead>
+            <h5 class="mb-3">Vista previa</h5>
+            <table class="table table-sm table-striped table-hover" style="font-size:.95rem">
+                <thead class="table-primary">
                     <tr>
-                        <th style="width: 180px;">Proveedor</th>
+                        <th>Archivo</th>
+                        <th>Proveedor</th>
+                        <th>Fecha</th>
+                        <th>Invoice</th>
                         <th>Concepto</th>
-                        <th style="width: 130px; text-align:right;">Importe neto</th>
-                        <th style="width: 110px; text-align:right;">IVA</th>
-                        <th style="width: 110px; text-align:right;">IRPF</th>
-                        <th style="width: 130px; text-align:right;">Importe bruto</th>
+                        <th class="text-end">Total Neto</th>
+                        <th class="text-end">IVA €</th>
+                        <th class="text-end">IRPF</th>
+                        <th class="text-end">Total Bruto</th>
                     </tr>
                 </thead>
-
                 <tbody>
-                    @foreach (var l in preview!.Lineas!)
+                    @foreach (var r in preview.Muestra)
                     {
                         <tr>
-                            <td class="text-center">@l.Proveedor</td>
-
-                            <td>@l.Concepto</td>
-                            <td class="text-end">@($"{l.Neto:N2} €")</td>
-                            <td class="text-end">@($"{l.IVA:N2} €")</td>
-                            <td class="text-end">@($"{l.IRPF:N2} €")</td>
-                            <td class="text-end">@($"{l.ImporteBruto:N2} €")</td>
-
+                            <td><span title="@r.Archivo">@Trunc(r.Archivo, 27)</span></td>
+                            <td><span title="@r.Proveedor">@Trunc(r.Proveedor, 27)</span></td>
+                            <td>@r.Fecha</td>
+                            <td>@r.Invoice</td>
+                            <td>@r.Concepto</td>
+                            <td class="text-end">@r.TotalNeto</td>
+                            <td class="text-end">@r.IVA</td>
+                            <td class="text-end">@r.IRPF</td>
+                            <td class="text-end fw-semibold">@r.TotalBruto</td>
                         </tr>
-
                     }
                 </tbody>
             </table>
+            <div class="text-muted small">
+                Mostrando @Math.Min(preview.Muestra.Count, 50) de @preview.Filas filas.
+            </div>
         </div>
+    }
+    else if (!string.IsNullOrWhiteSpace(previewJson))
+    {
+        <h6 class="text-muted mt-3">Vista previa (modo texto)</h6>
+        <pre style="white-space:pre-wrap">@previewJson</pre>
     }
 </div>
 
 @code
 {
+    // ===== Config =====
+    // Ajusta el puerto al que usa tu main.py. Ahora mismo: 8010.
+    const string EndpointPdf = "http://127.0.0.1:8000/api/pdf2excel";
+
+
     // ===== Estado UI =====
     List<IBrowserFile> files = new();
     bool busy;
@@ -127,35 +137,39 @@
     string? errMsg;
     bool drag;
 
-    // ===== Modelo de vista previa (de X-Preview) =====
+    string? previewJson;
     PreviewDto? preview;
 
-    sealed class PreviewDto
+    // ===== Modelos de vista previa (X-Preview de main.py) =====
+    public class PreviewDto
     {
-        public List<PreviewLine>? Lineas { get; set; }
-        // El resto de campos del JSON (Filas, Muestra, Errores) se ignoran si no los usamos
+        public int Filas { get; set; }
+        public List<Item> Muestra { get; set; } = new();
+
+        public class Item
+        {
+            public string? Archivo { get; set; }
+            public string? OCR { get; set; }
+            public string? Proveedor { get; set; }
+            public string? Fecha { get; set; }
+            public string? Invoice { get; set; }
+            public string? Concepto { get; set; }
+            public string? TotalNeto { get; set; }   // "Total Neto"
+            public string? IVA { get; set; }         // "IVA €"
+            public string? IRPF { get; set; }        // "IRPF"
+            public string? TotalBruto { get; set; }  // "Total Bruto"
+        }
     }
 
-    sealed class PreviewLine
-    {
-        public string Proveedor { get; set; } = "";
-        public string Concepto { get; set; } = "";
-        public decimal Neto { get; set; }
-        public decimal IVA { get; set; }
-        public decimal IRPF { get; set; }
-        public decimal ImporteBruto { get; set; }
-    }
-
-
-
-
+    // ===== Eventos =====
     void OnFileSelected(InputFileChangeEventArgs e)
     {
-        const int MaxPdfs = 50; // límite de PDFs
+        const int MaxPdfs = 50;
         files = e.GetMultipleFiles(MaxPdfs).ToList();
 
         okMsg = errMsg = null;
         preview = null;
+        previewJson = null;
         StateHasChanged();
     }
 
@@ -167,6 +181,7 @@
 
         okMsg = errMsg = null;
         preview = null;
+        previewJson = null;
         busy = true;
         StateHasChanged();
 
@@ -174,44 +189,36 @@
         {
             Console.WriteLine($"[Desglose] Inicio Upload. PDFs={files.Count}");
 
-            // 1) Preparar multipart/form-data con TODOS los PDFs seleccionados
-            var url = "http://127.0.0.1:8000/api/pdf2excel";
-
             using var form = new MultipartFormDataContent();
 
             foreach (var f in files)
             {
                 Console.WriteLine($"[Desglose] Añadiendo fichero: {f.Name}, size={f.Size}");
 
-                // 1) Leer el PDF completo en memoria (nos quitamos de encima el stream remoto de Blazor)
                 await using var stream = f.OpenReadStream(long.MaxValue);
-                using var ms = new System.IO.MemoryStream();
+                using var ms = new MemoryStream();
                 await stream.CopyToAsync(ms);
                 var bytes = ms.ToArray();
 
-                // 2) Crear el contenido HTTP desde el byte[]
                 var fileContent = new ByteArrayContent(bytes);
-                fileContent.Headers.ContentType =
-                    new MediaTypeHeaderValue("application/pdf");
+                fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
 
-                // 3) Campo "files" → es el que espera FastAPI (pdf2excel)
-                form.Add(fileContent, "files", f.Name);
+                // Campo "file" → coincide con `file: List[UploadFile]` en main.py
+                form.Add(fileContent, "file", f.Name);
             }
 
-            // HttpClient local, independiente de la inyección
-            using var client = new HttpClient
+            form.Headers.Add("X-Client", "Departamento-Financiero");
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, EndpointPdf)
             {
-                Timeout = TimeSpan.FromMinutes(10)
+                Content = form
             };
+            req.Headers.Add("Accept", "application/json, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
-            Console.WriteLine($"[Desglose] Enviando POST a {url}");
-
-            using var resp = await client.PostAsync(url, form);
+            using var resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
 
             Console.WriteLine($"[Desglose] Respuesta {(int)resp.StatusCode} {resp.StatusCode}");
 
-
-            // 2) Procesar respuesta
             if (!resp.IsSuccessStatusCode)
             {
                 var msg = await resp.Content.ReadAsStringAsync();
@@ -220,34 +227,15 @@
                 return;
             }
 
-            // 3) Vista previa desde cabecera X-Preview (si viene)
+            // X-Preview
             if (resp.Headers.TryGetValues("X-Preview", out var vals))
             {
-                var json = vals.FirstOrDefault();
-                if (!string.IsNullOrWhiteSpace(json))
-                {
-                    try
-                    {
-                        preview = System.Text.Json.JsonSerializer.Deserialize<PreviewDto>(
-                            json,
-                            new System.Text.Json.JsonSerializerOptions
-                            {
-                                PropertyNameCaseInsensitive = true,
-                                NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString
-                            });
-                    }
-                    catch (System.Text.Json.JsonException ex)
-                    {
-                        // No rompas la subida: solo muestra el error y sigue.
-                        errMsg = $"Error leyendo vista previa: {ex.Message}";
-                        Console.WriteLine($"[Desglose] Error deserializando X-Preview: {ex.Message}");
-                        Console.WriteLine($"[Desglose] X-Preview bruto: {json}");
-                    }
-                }
+                previewJson = vals.FirstOrDefault();
             }
 
+            ParsePreviewIfAny();
 
-            // 4) Descargar el Excel resultante
+            // Excel resultante
             var outBytes = await resp.Content.ReadAsByteArrayAsync();
             var outName = GetFileNameFromContentDisposition(resp)
                           ?? "Facturas_procesadas.xlsx";
@@ -256,6 +244,7 @@
 
             okMsg = "Archivo procesado correctamente.";
             Console.WriteLine("[Desglose] Upload completado OK.");
+            files.Clear();
         }
         catch (Exception ex)
         {
@@ -269,12 +258,9 @@
         }
     }
 
-
-
-
+    // ===== Utilidades =====
     static string? GetFileNameFromContentDisposition(HttpResponseMessage resp)
     {
-        // Soporta filename y filename* (UTF-8)
         if (resp.Content.Headers.ContentDisposition?.FileNameStar is string star &&
             !string.IsNullOrWhiteSpace(star))
         {
@@ -286,8 +272,55 @@
             }
             catch { }
         }
-
         var fn = resp.Content.Headers.ContentDisposition?.FileName;
         return string.IsNullOrWhiteSpace(fn) ? null : fn.Trim('"');
+    }
+
+    static string Trunc(string? s, int max) =>
+        string.IsNullOrEmpty(s) ? "" : (s.Length <= max ? s : s.Substring(0, Math.Max(0, max - 3)) + "...");
+
+    void ParsePreviewIfAny()
+    {
+        if (string.IsNullOrWhiteSpace(previewJson))
+        {
+            preview = null;
+            return;
+        }
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(previewJson);
+            var root = doc.RootElement;
+
+            var dto = new PreviewDto
+            {
+                Filas = root.GetProperty("Filas").GetInt32()
+            };
+
+            foreach (var e in root.GetProperty("Muestra").EnumerateArray())
+            {
+                dto.Muestra.Add(new PreviewDto.Item
+                {
+                    Archivo    = e.TryGetProperty("Archivo", out var v0) ? v0.GetString() : null,
+                    OCR        = e.TryGetProperty("OCR", out var v1) ? v1.GetString() : null,
+                    Proveedor  = e.TryGetProperty("Proveedor", out var v2) ? v2.GetString() : null,
+                    Fecha      = e.TryGetProperty("Fecha", out var v3) ? v3.GetString() : null,
+                    Invoice    = e.TryGetProperty("Invoice", out var v4) ? v4.GetString() : null,
+                    Concepto   = e.TryGetProperty("Concepto", out var v5) ? v5.GetString() : null,
+                    TotalNeto  = e.TryGetProperty("Total Neto", out var v6) ? v6.GetString() : null,
+                    IVA        = e.TryGetProperty("IVA €", out var v7) ? v7.GetString() : null,
+                    IRPF       = e.TryGetProperty("IRPF", out var v8) ? v8.GetString() : null,
+                    TotalBruto = e.TryGetProperty("Total Bruto", out var v9) ? v9.GetString() : null,
+                });
+            }
+
+            preview = dto;
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            errMsg = $"Error leyendo vista previa: {ex.Message}";
+            Console.WriteLine($"[Desglose] Error deserializando X-Preview: {ex.Message}");
+            Console.WriteLine($"[Desglose] X-Preview bruto: {previewJson}");
+        }
     }
 }

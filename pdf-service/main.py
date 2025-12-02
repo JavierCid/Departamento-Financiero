@@ -236,310 +236,167 @@ def _fmt_eu(v: float | None) -> str:
     return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 # =========================
-# Parser PDFs (pdf2excel)
+# Parser
 # =========================
-
 def parse_pdf_to_df(pdf_bytes: bytes, nombre_archivo: str) -> pd.DataFrame:
-    import pytesseract
-    from pdf2image import convert_from_bytes
-    import os
-
-    # --- Configuración rutas OCR (opcional si no están en PATH) ---
-    tess = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-    if os.path.exists(tess):
-        pytesseract.pytesseract.tesseract_cmd = tess
-
-    POPPLER_BIN = r"C:\tools\poppler\Library\bin"  # ajusta si usaste otra ruta
-    use_poppler = os.path.isdir(POPPLER_BIN)
-
-    # 1) Intento de extracción de texto nativo (PDF con texto embebido)
+    """
+    Usa el extractor estable (Neto + IVA + IRPF = Importe Bruto, tolerancia ±0,05),
+    corrige el patrón “21,00 % I.V.A. s/…”, y limpia incoherencias.
+    """
+    # Extraer textos de todas las páginas
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         pages_texts = []
         for p in pdf.pages:
             t = p.extract_text() or ""
-            # Si la página viene vacía o con muy poco texto, forzamos OCR de esa página
-            if not t.strip() or len(t.strip()) < 40:
-                try:
-                    img = convert_from_bytes(
-                        pdf_bytes,
-                        first_page=p.page_number,
-                        last_page=p.page_number,
-                        poppler_path=POPPLER_BIN if use_poppler else None,
-                        dpi=300
-                    )[0]
-                    ocr_text = pytesseract.image_to_string(
-                        img,
-                        lang="spa+eng",
-                        config="--oem 1 --psm 6"
-                    )
-
-                    if ocr_text.strip():
-                        pages_texts.append(ocr_text)
-                        continue
-                except Exception as e:
-                    print(f"[WARN] OCR page {p.page_number} failed: {e}")
-            # Si había texto suficiente, nos quedamos con el de pdfplumber
             if t.strip():
                 pages_texts.append(t)
 
-    # 2) Si aun así no hay nada, OCR al documento completo como último recurso
-    if not pages_texts:
-        try:
-            images = convert_from_bytes(
-                pdf_bytes,
-                poppler_path=POPPLER_BIN if use_poppler else None,
-                dpi=300
-            )
-            for img in images:
-                ocr_text = pytesseract.image_to_string(
-                    img,
-                    lang="spa+eng",
-                    config="--oem 1 --psm 6"
-                )
-
-                if ocr_text.strip():
-                    pages_texts.append(ocr_text)
-        except Exception as e:
-            print(f"[WARN] OCR fallback failed: {e}")
-
-    # 3) Parseo de campos
+    # Pasar por el extractor
     fields = extract_from_pages(pages_texts, nombre_archivo)
 
-    proveedor = fields.get("Proveedor_full") or fields.get("Proveedor")
-    invoice = (
-        fields.get("Invoice_full") or fields.get("Invoice")
-        or fields.get("Factura") or fields.get("Nº factura")
-    )
-    concepto = fields.get("Concepto_full") or fields.get("Concepto")
-
+    # Normalizar nombres
     row = {
-        "Proveedor": proveedor,
+        "Proveedor": fields.get("Proveedor"),
         "Fecha": fields.get("Fecha"),
-        "Invoice": invoice,
-        "Concepto": concepto,
+        "Invoice": fields.get("Invoice") or fields.get("Factura") or fields.get("Nº factura"),
+        "Concepto": fields.get("Concepto"),
         "Neto": fields.get("Neto"),
         "IVA": fields.get("IVA"),
         "IRPF": fields.get("IRPF"),
-        "Importe Bruto": (
-            fields.get("Importe bruto")
-            or fields.get("Total Bruto")
-            or fields.get("Bruto")
-        ),
+        "Importe Bruto": fields.get("Importe bruto") or fields.get("Total Bruto") or fields.get("Bruto"),
     }
 
     cols = ["Proveedor", "Fecha", "Invoice", "Concepto", "Neto", "IVA", "IRPF", "Importe Bruto"]
     return pd.DataFrame([row], columns=cols)
 
-
 # =========================
-# Endpoint PDF -> Excel
+# Endpoint principal
 # =========================
-
-
 @app.post("/api/pdf2excel")
-async def pdf2excel(
-    request: Request,
-    file: List[UploadFile] = File(None),
-    files: List[UploadFile] = File(None),
-):
+async def pdf2excel(file: List[UploadFile] = File(...)):
     """
-    Recibe uno o varios PDFs como multipart/form-data (campos 'files' o 'file')
-    reenviados por la Function y devuelve un Excel + X-Preview para Blazor.
+    Acepta uno o varios PDFs y devuelve un Excel + cabecera 'X-Preview'.
     """
-    # 1) Unificar todos los ficheros recibidos
-    uploads: List[UploadFile] = []
-    if file:
-        uploads.extend(file)
-    if files:
-        uploads.extend(files)
-
-    # Fallback: intentar leer cualquier campo tipo fichero del formulario
-    if not uploads:
-        form = await request.form()
-        for v in form.values():
-            if isinstance(v, UploadFile):
-                uploads.append(v)
-
-    if not uploads:
+    if not file:
         raise HTTPException(status_code=400, detail="Sube al menos un PDF")
 
-    dfs: List[pd.DataFrame] = []
-    errores: List[str] = []
-
-    for f in uploads:
+    dfs: list[pd.DataFrame] = []
+    for f in file:
         if not f.filename.lower().endswith(".pdf"):
-            errores.append(f"'{f.filename}' no es un PDF")
-            continue
+            raise HTTPException(status_code=400, detail=f"'{f.filename}' no es un PDF")
 
         contenido = await f.read()
         if not contenido:
-            errores.append(f"'{f.filename}' está vacío")
-            continue
+            raise HTTPException(status_code=400, detail=f"'{f.filename}' está vacío")
 
         try:
             df = parse_pdf_to_df(contenido, f.filename)
+            # Añadimos columna Archivo (nombre completo) para Excel;
+            # y versión recortada para vista previa
             df["Archivo"] = f.filename
             df["ArchivoPreview"] = _short_name(f.filename, 27)
             dfs.append(df)
         except Exception as e:
-            errores.append(f"Error leyendo '{f.filename}': {e}")
-
-    if not dfs:
-        # Ningún PDF se pudo procesar
-        detalle = "No se pudo procesar ningún PDF."
-        if errores:
-            detalle += " " + " | ".join(errores)
-        raise HTTPException(status_code=500, detail=detalle)
+            raise HTTPException(status_code=500, detail=f"Error leyendo '{f.filename}': {e}")
 
     df_total = pd.concat(dfs, ignore_index=True) if len(dfs) > 1 else dfs[0]
 
-
-    # ===== Generar Excel (igual que antes) =====
+    # ====== Generar Excel ======
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as w:
+        # Orden de columnas para Excel (incluimos Archivo completo)
         cols = [
-            "Archivo", "Proveedor", "Fecha", "Invoice", "Concepto",
-            "Neto", "IVA", "IRPF", "Importe Bruto",
+            "Archivo",
+            "Proveedor",
+            "Fecha",
+            "Invoice",
+            "Concepto",
+            "Neto",
+            "IVA",
+            "IRPF",
+            "Importe Bruto",
         ]
         df_excel = df_total.reindex(columns=cols)
         df_excel.to_excel(w, index=False, sheet_name="Facturas")
 
-        from openpyxl.styles import Font, Alignment, PatternFill, Border
-        from openpyxl.utils import get_column_letter
+        # Formato bonito
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
         wb = w.book
         ws = wb["Facturas"]
 
+        # Formato numérico europeo (€ con punto de miles y coma decimal)
         euro_fmt = '#,##0.00 [$€-40C]'
-        for col in ["F", "G", "H", "I"]:
+        for col in ["F", "G", "H", "I"]:  # Neto, IVA, IRPF, Importe Bruto
             for cell in ws[col]:
                 if isinstance(cell.value, (int, float)):
                     cell.number_format = euro_fmt
 
+        # Quitar cuadrícula
         ws.sheet_view.showGridLines = False
 
+        # Estilos encabezado
         header_font = Font(bold=True, color="FFFFFF")
         header_fill = PatternFill("solid", fgColor="4F81BD")
         center_align = Alignment(horizontal="center", vertical="center")
-
+        thin_border = Border(
+            left=Side(style="thin"), right=Side(style="thin"),
+            top=Side(style="thin"), bottom=Side(style="thin")
+        )
         for cell in ws[1]:
             cell.font = header_font
             cell.fill = header_fill
             cell.alignment = center_align
-            cell.border = Border()
+            cell.border = thin_border
 
-        for col_idx in range(1, 10):  # A..I
-            col_letter = get_column_letter(col_idx)
+        # Ajuste de ancho y bordes/alineación general
+        for col_cells in ws.columns:
             max_len = 0
-            for cell in ws[col_letter]:
-                v = cell.value
-                if v is None:
-                    l = 0
-                elif isinstance(v, (int, float)):
-                    l = len(f"{v:,.2f}")
+            col_letter = col_cells[0].column_letter
+            for cell in col_cells:
+                val = "" if cell.value is None else str(cell.value)
+                if len(val) > max_len:
+                    max_len = len(val)
+                # Bordes + alineación por tipo
+                cell.border = thin_border
+                if isinstance(cell.value, (int, float)):
+                    cell.alignment = Alignment(horizontal="right", vertical="center")
                 else:
-                    l = len(str(v))
-                if l > max_len:
-                    max_len = l
-
-                if cell.row != 1:
-                    cell.border = Border()
-                    cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=False)
-
-            ws.column_dimensions[col_letter].width = max(10, min(max_len + 2, 50))
+                    cell.alignment = Alignment(horizontal="left", vertical="center")
+            ws.column_dimensions[col_letter].width = max_len + 4
 
     xlsx_bytes = out.getvalue()
 
-    # ===== Vista previa para DesglosarFacturas (Cuenta / Concepto / Neto / IVA / IRPF / Bruto) =====
-    lineas = []
-    for _, r in df_total.head(200).iterrows():
-        cuenta = str(r.get("Proveedor") or "").strip()
-        if len(cuenta) > 30:
-            cuenta = cuenta[:30] + "…"
-
-        concepto = str(r.get("Concepto") or r.get("Invoice") or "").strip()
-        if len(concepto) > 80:
-            concepto = concepto[:80] + "…"
-
-        def _num(col):
-            v = r.get(col)
-
-            # Tratar None / "" / NaN como 0.0
-            if v is None:
-                return 0.0
-            if isinstance(v, str):
-                if not v.strip():
-                    return 0.0
-                num = _to_float_eu(v) or 0.0
-                # por si _to_float_eu devolviera NaN
-                return 0.0 if pd.isna(num) else float(num)
-
-            if pd.isna(v):
-                return 0.0
-
-            if isinstance(v, (int, float)):
-                return float(v)
-
-            num = _to_float_eu(v) or 0.0
-            return 0.0 if pd.isna(num) else float(num)
-
-        neto = _num("Neto")
-        iva = _num("IVA")
-        irpf = _num("IRPF")
-        bruto = _num("Importe Bruto")
-        if bruto == 0 and (neto != 0 or iva != 0 or irpf != 0):
-            bruto = neto + iva - irpf
-
-        lineas.append({
-            "Proveedor": cuenta,  # ← aquí ya usamos el proveedor
-            "Concepto": concepto,
-            "Neto": round(neto, 2),
-            "IVA": round(iva, 2),
-            "IRPF": round(irpf, 2),
-            "ImporteBruto": round(bruto, 2),
-        })
-
-
-
-
-    # (Opcional) preview “clásico” por si lo quieres en otras pantallas
+    # ====== Vista previa (máx. 50 filas) ======
     preview_rows = []
     for _, r in df_total.head(50).iterrows():
         preview_rows.append({
-            "Archivo": _clip(r.get("ArchivoPreview"), 27),
+            "Archivo": _clip(r.get("ArchivoPreview"), 27),     # <= 27
             "OCR": "—",
-            "Proveedor": _clip(r.get("Proveedor"), 27),
+            "Proveedor": _clip(r.get("Proveedor"), 27),        # <= 27
             "Fecha": r.get("Fecha"),
             "Invoice": r.get("Invoice"),
-            "Concepto": _clip(r.get("Concepto"), 30),
+            "Concepto": r.get("Concepto"),
             "Total Neto": _fmt_eur(r.get("Neto")),
             "IVA €": _fmt_eur(r.get("IVA")),
             "IRPF": _fmt_eur(r.get("IRPF")),
             "Total Bruto": _fmt_eur(r.get("Importe Bruto")),
         })
 
-    preview = {
-        "Lineas": lineas,
-        "Filas": int(len(df_total)),
-        "Muestra": preview_rows,
-    }
-    if errores:
-        preview["Errores"] = errores
+    preview = {"Filas": int(len(df_total)), "Muestra": preview_rows}
 
-
-    out_name = "Facturas procesadas.xlsx"
+    # ====== Nombre de salida ======
+    base = (file[0].filename if file else "archivo.pdf").rsplit(".", 1)[0]
+    out_name = f"Desglose_{base}.xlsx"
     content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
     headers = {
         "Content-Disposition": f'attachment; filename="{out_name}"; filename*=UTF-8\'\'{quote(out_name)}',
+        # ensure_ascii=True evita problemas de codificación en cabeceras
         "X-Preview": json.dumps(preview, ensure_ascii=True),
     }
 
     return Response(content=xlsx_bytes, media_type=content_type, headers=headers)
-
-
-
-
 # =========================
 # Endpoint BankFlow Pro
 # =========================
