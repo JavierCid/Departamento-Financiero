@@ -582,13 +582,14 @@ async def contraste_facturas(
             extra_blocks = re.findall(r"[A-Z0-9]{4,}", nombre.upper())
             for eb in extra_blocks:
                 eb_norm = _norm_invoice_code(eb)
-                if eb_norm in excel_index:
-                    coincidencia = excel_index[eb_norm]
-                    razon = (
-                        f"'{eb}' del archivo coincide con "
-                        f"celda (columna '{coincidencia['columna']}', fila {coincidencia['fila']}) → {coincidencia['valor']}"
-                    )
-                    break
+                if eb_norm in excel_index and all(
+                    eb_norm != _norm_invoice_code(c["code"]) for c in coincidencias_encontradas
+                ):
+                    coincidencias_encontradas.append({
+                        "code": eb,
+                        "coincidencia": excel_index[eb_norm],
+                        "origen": "secundaria",
+                    })
 
         if not coincidencia:
             razon = f"Ningún código del archivo ({', '.join(posibles_codigos)}) se encontró en el Excel"
@@ -1001,5 +1002,3 @@ if __name__ == "__main__":
     import uvicorn  # puedes quitar esta línea si ya lo importas arriba
     print("✅ FastAPI corriendo en http://127.0.0.1:8000")
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
-
-

@@ -795,13 +795,16 @@ table.table tbody td {
     color: var(--df-muted);
     border: 1px solid var(--df-border);
     /* Estilo compacto */
-    padding: 8px 16px;
+    padding: 9px 16px;
     font-size: 1.05rem; /* un poco más grande */
     font-weight: 400; /* sin negrita */
     /* Transiciones y bordes */
     border-radius: 10px;
     transition: background-color 0.2s ease, color 0.2s ease;
+    /* Separación respecto a la línea superior */
+    margin-top: 0.35rem;
 }
+
 
 
     .btn-file:hover {
@@ -810,6 +813,16 @@ table.table tbody td {
         color: var(--df-text);
         border-color: rgba(255,255,255,.18);
     }
+    .bankflow .df-upload-remesa {
+    margin-top: 0.75rem; /* separa todo el bloque de la dropzone superior */
+    }
+
+    .bankflow .df-upload-remesa > label {
+        display: block;
+        margin-top: 0.25rem; /* separación extra respecto al extracto */
+        margin-bottom: 0rem; /* separación texto → dropzone */
+    }
+
 
 /* Oculta el input original y el texto "Ningún archivo seleccionado" */
 .bankflow input[type="file"] {
@@ -875,7 +888,7 @@ table.table tbody td {
 .prinex-desc {
     color: #a5b4fc;
     font-size: rem;
-    margin-top: -0.4rem;
+    margin-top: 0rem;
 }
 
 /* ===== Logo BankFlow Pro ===== */
@@ -886,12 +899,12 @@ table.table tbody td {
     .bankflow-head h2 {
         font-size: 26px; /* mismo tamaño que PDF */
         font-weight: 600;
-        margin-bottom: 2px; /* hueco pequeño con la descripción */
+        margin-bottom: -10px; /* hueco pequeño con la descripción */
     }
 
 .bankflow-description {
     color: #a5b4fc;
-    margin-top: 2px;
+    margin-top: -10px;
 }
 
 
@@ -928,7 +941,7 @@ table.table tbody td {
 
 .pdf-desc {
     color: #a5b4fc;
-    margin-top: 2px; /* reduce aún más el hueco */
+    margin-top: -10px; /* reduce aún más el hueco */
 }
 
 .pdf-logo {

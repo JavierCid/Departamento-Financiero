@@ -1,6 +1,7 @@
 ﻿@page "/cuadrepdfprinex"
 
 @using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components
 @using System.Text
 @inject HttpClient Http
 @inject IJSRuntime JS
@@ -16,6 +17,7 @@
         Compara las facturas de la carpeta con las facturas pendientes de Prinex
     </div>
 
+    <!-- Botones superiores -->
     <div class="df-uploader">
         <div class="df-filepick">
             <button type="button" class="btn btn-ghost df-filebtn">Seleccionar facturas (PDF)</button>
@@ -27,10 +29,61 @@
             <InputFile OnChange="OnExcelSelected" accept=".xlsx,.xls" />
         </div>
 
-        <button class="btn btn-primary" @onclick="Enviar" disabled="@(!_canSend || _busy)">
+        <button class="btn btn-primary df-btn-procesar" @onclick="Enviar" disabled="@(!_canSend || _busy)">
             @(_busy ? "Procesando..." : "Procesar")
         </button>
     </div>
+
+    <!-- Dropzone para PDFs al estilo PDFFlow -->
+    <div class="@($"df-drop df-drop--hero{(_drag ? " drag" : string.Empty)}")"
+         @ondragover:preventDefault
+         @ondragenter="() => SetDrag(true)"
+         @ondragleave="() => SetDrag(false)"
+         @ondrop="() => SetDrag(false)">
+
+        <InputFile class="df-drop__input" OnChange="OnPdfsSelected" accept=".pdf" multiple />
+
+        <div class="df-drop__icon">
+            <i class="bi bi-file-earmark-pdf"></i>
+        </div>
+        <div class="df-drop__title">Arrastra aquí tus facturas en PDF</div>
+        <div class="df-drop__hint">…o usa “Seleccionar facturas (PDF)”</div>
+    </div>
+
+    <!-- Filtros inferiores -->
+    <div class="df-filters-row">
+
+        <div class="df-sociedad-wrapper">
+            <label class="df-sociedad-label">
+                Sociedad (opcional)*
+            </label>
+            <input class="form-control form-control-sm df-sociedad-input"
+                   placeholder="Ej: Traviata, Midford..."
+                   @bind="_sociedadFiltro" />
+
+            <div class="df-sociedad-help">
+                *Sin incluir este filtro la búsqueda se hace sobre las facturas pendientes de todas las sociedades.
+                El resultado tendrá mayor eficacia (más coincidencias), pero menor precisión (más falsos positivos).
+            </div>
+        </div>
+
+        <div class="df-periodo-wrapper">
+            <label class="df-periodo-label">
+                Periodo (opcional)*
+            </label>
+            <input class="form-control form-control-sm df-periodo-input"
+                   placeholder="Ej: 11/2025"
+                   @bind="_periodoFiltro" />
+
+            <div class="df-periodo-help">
+                *Sin incluir este filtro la búsqueda se hace sobre las facturas pendientes de todo el periodo.
+                El resultado tendrá mayor eficacia (más coincidencias), pero menor precisión (más falsos positivos).
+            </div>
+        </div>
+    </div>
+
+
+ 
 
     @if (_pdfs.Count > 0 || _excel is not null || !string.IsNullOrWhiteSpace(_ok) || !string.IsNullOrWhiteSpace(_err))
     {
@@ -61,7 +114,7 @@
     {
         <div class="df-preview card df-card p-3 mt-3">
             <h5 class="mb-2">Vista previa del cruce</h5>
-            
+
 
 
             @if (_preview.Coincidencias?.Count > 0)
@@ -70,31 +123,31 @@
                 <p class="df-section-subtitle">
                     Facturas que tienen PDF y factura pendiente asociada en Prinex.
                 </p>
-                <table class="table table-sm table-striped table-hover">
+                <table class="table table-sm table-striped table-hover df-table-coinc">
+
 
                     <thead class="table-primary">
                         <tr>
                             <th>Documento</th>
-                            <th>Coincidencia detectada</th>
-
+                            <th>Coincidencias detectadas en Prinex</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var f in _preview.Coincidencias)
+                        @foreach (var c in _preview.Coincidencias)
                         {
                             <tr>
-                                <td>@f.Documento</td>
-                                <td class="small text-muted" title="@f.CoincidenciaDetectada">
-                                    @f.CoincidenciaDetectada
-                                </td>
-
+                                <td title="@c.Documento">@ShortDoc(c.Documento)</td>
+                                <td>@FormatCoincidencia(c.CoincidenciaDetectada)</td>
 
                             </tr>
                         }
+
                     </tbody>
 
                 </table>
+
             }
+
 
             @if (_preview.Faltantes?.Count > 0)
             {
@@ -102,13 +155,27 @@
                 <p class="df-section-subtitle">
                     Facturas que sí tienen PDF cargado pero no aparecen como pendientes en Prinex.
                 </p>
-                <ul class="df-list">
-                    @foreach (var f in _preview.Faltantes)
-                    {
-                        <li>@f</li>
-                    }
-                </ul>
+                <table class="table table-sm table-striped table-hover df-table-coinc">
+
+                    <thead class="table-warning">
+                        <tr>
+                            <th>Documento</th>
+                            <th>Posibles motivos de la ausencia de hallazgos</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var raw in _preview.Faltantes)
+                        {
+                            var f = ParseFaltante(raw);
+                            <tr>
+                                <td title="@f.Documento">@ShortDoc(f.Documento)</td>
+                                <td>@f.Motivo</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
             }
+
 
 
             @if (_preview.Descuadres?.Count > 0)
@@ -153,13 +220,55 @@
 </div>
 
 @code {
+    private static MarkupString FormatCoincidencia(string? txt)
+    {
+        if (string.IsNullOrWhiteSpace(txt))
+            return default;
+
+        // Añadimos negrita sólo dentro de los paréntesis
+        var s = txt
+    .Replace("(factura)", "<strong>(factura)</strong>")
+    .Replace("(proveedor)", "<strong>(proveedor)</strong>")
+    .Replace("(fecha)", "<strong>(fecha)</strong>");
+
+
+        return (MarkupString)s;
+    }
+
+    private static string ShortDoc(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return string.Empty;
+
+        const int max = 60; // mismo límite para Coincidencias y Faltantes
+        return name.Length <= max ? name : name.Substring(0, max) + "…";
+    }
+
+    private static (string Documento, string Motivo) ParseFaltante(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return (string.Empty, string.Empty);
+
+        var txt = raw.Trim();
+        var idx = txt.IndexOf('→');
+        if (idx < 0)
+            return (txt, string.Empty);
+
+        var doc = txt.Substring(0, idx).Trim();
+        var motivo = txt.Substring(idx + 1).Trim();
+        return (doc, motivo);
+    }
+
     const string EndpointCuadre = "http://localhost:7071/api/contraste-facturas";
+
 
     // Payload que mandamos a la Azure Function (PDFs + Excel en base64)
     private class UploadDto
     {
         public List<FileDto> Pdfs { get; set; } = new();
         public FileDto? Excel { get; set; }
+        public string SociedadFiltro { get; set; } = string.Empty;
+        public string PeriodoFiltro { get; set; } = string.Empty; // ej: 11/2025
 
         public class FileDto
         {
@@ -171,13 +280,25 @@
 
 
 
+
+
+
     List<IBrowserFile> _pdfs = new();
     IBrowserFile? _excel;
     bool _busy;
     string? _ok, _err;
     PreviewDto? _preview;
+    string _sociedadFiltro = string.Empty;
+    string _periodoFiltro = string.Empty; // MM/AAAA, opcional
+
+    // Estado visual de la dropzone de PDFs
+    bool _drag;
 
     bool _canSend => _pdfs.Count > 0 && _excel is not null;
+
+    void SetDrag(bool value) => _drag = value;
+
+
 
     void OnPdfsSelected(InputFileChangeEventArgs e)
     {
@@ -224,7 +345,13 @@
 
         try
         {
-            var dto = new UploadDto();
+            var dto = new UploadDto
+            {
+                SociedadFiltro = _sociedadFiltro?.Trim() ?? string.Empty,
+                PeriodoFiltro = string.Empty
+            };
+
+
 
             // PDFs
             foreach (var pdf in _pdfs)
@@ -252,7 +379,13 @@
                 };
             }
 
+            dto.SociedadFiltro = string.IsNullOrWhiteSpace(_sociedadFiltro)
+    ? string.Empty
+    : _sociedadFiltro;
+
+
             var jsonBody = System.Text.Json.JsonSerializer.Serialize(dto);
+
             using var content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
 
             var resp = await Http.PostAsync(EndpointCuadre, content);
@@ -337,11 +470,11 @@
         border-collapse: collapse;
     }
 
-        .page-Cuadrepdfprinex .table th,
-        .page-Cuadrepdfprinex .table td {
-            padding: 0.35rem 0.45rem;
-            vertical-align: middle;
-        }
+    /* Sangrado extra en la 2ª columna de Coincidencias/Faltantes */
+    .page-Cuadrepdfprinex .df-table-coinc td:nth-child(2) {
+        padding-left: 1.4rem; /* ~3 espacios extra respecto al padding base */
+    }
+
 
     .page-Cuadrepdfprinex th:nth-child(1),
     .page-Cuadrepdfprinex td:nth-child(1) {
@@ -366,7 +499,9 @@
         font-weight: 700;
         color: #fff;
         background: #243b55;
+        text-align: center; /* centra el texto de todos los th */
     }
+
 
     .page-Cuadrepdfprinex {
         margin-top: 0.75rem;
@@ -478,4 +613,88 @@
             cursor: pointer;
         }
 
+        .page-Cuadrepdfprinex .df-label {
+            display: block;
+            font-size: 0.85rem;
+            margin-bottom: 0.15rem;
+            color: #9ca3af;
+        }
+
+        .page-Cuadrepdfprinex .df-input {
+            max-width: 260px;
+            font-size: 0.9rem;
+            padding: 0.25rem 0.5rem;
+            background: #020617;
+            border-radius: 0.5rem;
+            border: 1px solid #1f2937;
+            color: #f9fafb;
+        }
+
+        /* ====== Filtros superiores (sociedad + periodo) ====== */
+        .page-Cuadrepdfprinex .df-filters-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            margin-top: 1.25rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .page-Cuadrepdfprinex .df-sociedad-wrapper,
+        .page-Cuadrepdfprinex .df-periodo-wrapper {
+            min-width: 260px;
+            max-width: 360px;
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+
+        .page-Cuadrepdfprinex .df-sociedad-label,
+        .page-Cuadrepdfprinex .df-periodo-label {
+            font-size: 0.80rem;
+            color: #9ca3af;
+            margin-bottom: 0;
+        }
+
+        .page-Cuadrepdfprinex .df-sociedad-input,
+        .page-Cuadrepdfprinex .df-periodo-input {
+            background: #020617;
+            border-radius: 999px;
+            border: 1px solid #1f2937;
+            padding: 0.35rem 0.9rem;
+            font-size: 0.9rem;
+            color: #e5e7eb;
+        }
+
+            .page-Cuadrepdfprinex .df-sociedad-input::placeholder,
+            .page-Cuadrepdfprinex .df-periodo-input::placeholder {
+                color: #4b5563;
+            }
+
+        .page-Cuadrepdfprinex .df-sociedad-help,
+        .page-Cuadrepdfprinex .df-periodo-help {
+            font-size: 0.72rem;
+            color: #6b7280;
+            max-width: 360px;
+        }
+
+        /* ====== Fila de botones (PDF / Excel / Procesar) ====== */
+        .page-Cuadrepdfprinex .df-uploader {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .page-Cuadrepdfprinex .df-filepick {
+            display: inline-flex;
+            align-items: center;
+            position: relative;
+        }
+
+        .page-Cuadrepdfprinex .df-btn-procesar {
+            min-width: 150px;
+        }
+
 </style>
+

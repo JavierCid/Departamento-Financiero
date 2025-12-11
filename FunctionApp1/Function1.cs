@@ -1,4 +1,5 @@
 ﻿using ClosedXML.Excel;
+using DocumentFormat.OpenXml.Wordprocessing;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -50,7 +51,9 @@ namespace FunctionApp1
         {
             public List<CuadreFile> Pdfs { get; set; } = new();
             public CuadreFile? Excel { get; set; }
+            public string? SociedadFiltro { get; set; }
         }
+
 
         private sealed class CuadreFile
         {
@@ -278,7 +281,8 @@ namespace FunctionApp1
                 }
 
                 var excelBytes = Convert.FromBase64String(data.Excel.Base64);
-                var preview = BuildPreviewFromPdfNamesAndExcel(excelBytes, data.Pdfs);
+                var preview = BuildPreviewFromPdfNamesAndExcel(excelBytes, data.Pdfs, data.SociedadFiltro);
+
 
                 var resp = req.CreateResponse(HttpStatusCode.OK);
                 resp.Headers.Add("X-Preview", System.Text.Json.JsonSerializer.Serialize(preview));
@@ -302,16 +306,16 @@ namespace FunctionApp1
 
         {
             var origin = GetAllowedOrigin(req);
-    if (!string.IsNullOrEmpty(origin))
-    {
-        resp.Headers.Add("Access-Control-Allow-Origin", origin);
-        resp.Headers.Add("Vary", "Origin");
-        resp.Headers.Add("Access-Control-Allow-Methods", "POST, OPTIONS");
-        resp.Headers.Add("Access-Control-Allow-Headers", "Content-Type, X-File-Name");
-        // 👉 nuevo: permite que el front lea estas cabeceras
-        resp.Headers.Add("Access-Control-Expose-Headers", "Content-Disposition, X-Preview");
-    }
-}
+            if (!string.IsNullOrEmpty(origin))
+            {
+                resp.Headers.Add("Access-Control-Allow-Origin", origin);
+                resp.Headers.Add("Vary", "Origin");
+                resp.Headers.Add("Access-Control-Allow-Methods", "POST, OPTIONS");
+                resp.Headers.Add("Access-Control-Allow-Headers", "Content-Type, X-File-Name");
+                // 👉 nuevo: permite que el front lea estas cabeceras
+                resp.Headers.Add("Access-Control-Expose-Headers", "Content-Disposition, X-Preview");
+            }
+        }
 
 
         // ============================================================
@@ -437,7 +441,7 @@ namespace FunctionApp1
                 string fase = NormalizePhase(wsSrc.Cell(r, cFase).Value);
                 if (!(fase == "VISADO PM" || fase == "CONTABILIZAR FACTURA")) continue;
 
-                
+
 
 
                 if (cSocSrc > 0 && !CellContainsSociedad(wsSrc.Cell(r, cSocSrc).Value, sociedadClave)) continue;
@@ -644,8 +648,7 @@ namespace FunctionApp1
         }
 
         // ============================================================
-        // ======== LÓGICA CUADRE PDFs ↔ PRINEX (simplificada) ========
-        // ============================================================
+        // ======== LÓGICA CUADRE PDFs ↔ PRINEX (con repesca proveedor+número) ========
         private static PreviewPdfDto BuildPreviewFromPdfNamesAndExcel(
             byte[] excelBytes,
             List<CuadreFile> pdfFiles)
@@ -655,83 +658,980 @@ namespace FunctionApp1
             using var ms = new MemoryStream(excelBytes);
             using var wb = new XLWorkbook(ms);
 
-            var ws = wb.Worksheets.FirstOrDefault(s =>
-                          string.Equals(s.Name, "Sheet1", StringComparison.OrdinalIgnoreCase))
-                     ?? wb.Worksheets.FirstOrDefault(s =>
-                          string.Equals(s.Name, "Hoja1", StringComparison.OrdinalIgnoreCase))
+            // Hoja base (Sheet1 / Hoja1 / primera)
+            var ws = wb.Worksheets.FirstOrDefault(s => string.Equals(s.Name, "Sheet1", StringComparison.OrdinalIgnoreCase))
+                     ?? wb.Worksheets.FirstOrDefault(s => string.Equals(s.Name, "Hoja1", StringComparison.OrdinalIgnoreCase))
                      ?? wb.Worksheets.First();
 
+            // Intentamos localizar cabeceras mínimas
             var reqSrc = new[] { "S/Fra. Número", "Importe" };
             int headerRow = FindHeaderRow(ws, reqSrc, 60);
-            if (headerRow == 0) headerRow = 1;
+            if (headerRow == 0)
+            {
+                // fallback: asumimos fila 1
+                headerRow = 1;
+            }
 
             int cFra = FindHeaderCol(ws, headerRow, "S/Fra. Número");
+            if (cFra == 0)
+            {
+                // Fallback muy laxo: primera columna cuyo título contenga "fra" o "factura"
+                int lastCol = ws.LastColumnUsed()?.ColumnNumber() ?? 0;
+                for (int c = 1; c <= lastCol && cFra == 0; c++)
+                {
+                    var h = ws.Cell(headerRow, c).GetString().Trim();
+                    var hUp = RemoveDiacritics(h).ToUpperInvariant();
+                    if (hUp.Contains("FRA") || hUp.Contains("FACTURA"))
+                        cFra = c;
+                }
+
+                if (cFra == 0)
+                    throw new InvalidOperationException("No se encuentra la columna de número de factura en el Excel de Prinex.");
+            }
+
             int cImporte = FindHeaderCol(ws, headerRow, "Importe");
 
-            if (cFra == 0)
-                throw new InvalidOperationException("No se encuentra la columna 'S/Fra. Número' en el Excel de Prinex.");
+            // Columna Concepto (opcional, para repesca avanzada)
+            int cConcepto = FindHeaderCol(ws, headerRow, "Concepto");
+            if (cConcepto == 0)
+            {
+                int lastColConcept = ws.LastColumnUsed()?.ColumnNumber() ?? 0;
+                for (int c = 1; c <= lastColConcept && cConcepto == 0; c++)
+                {
+                    var h = ws.Cell(headerRow, c).GetString();
+                    var hUp = RemoveDiacritics(h).ToUpperInvariant();
+                    if (hUp.Contains("CONCEPTO") || hUp.Contains("DESCRIPCION"))
+                        cConcepto = c;
+                }
+            }
 
+
+            // Columna Nombre proveedor (búsqueda flexible)
+            int cProveedor = FindHeaderCol(ws, headerRow, "Nombre proveedor");
+            if (cProveedor == 0)
+            {
+                int lastCol = ws.LastColumnUsed()?.ColumnNumber() ?? 0;
+                for (int c = 1; c <= lastCol && cProveedor == 0; c++)
+                {
+                    var h = ws.Cell(headerRow, c).GetString();
+                    var hUp = RemoveDiacritics(h).ToUpperInvariant();
+                    if (hUp.Contains("PROVEEDOR"))
+                        cProveedor = c;
+                }
+            }
+
+            // Columna Fecha Fra. (búsqueda flexible)
+            int cFechaFra = FindHeaderCol(ws, headerRow, "Fecha Fra.");
+            if (cFechaFra == 0)
+            {
+                int lastCol = ws.LastColumnUsed()?.ColumnNumber() ?? 0;
+                for (int c = 1; c <= lastCol && cFechaFra == 0; c++)
+                {
+                    var h = ws.Cell(headerRow, c).GetString();
+                    var hUp = RemoveDiacritics(h).ToUpperInvariant();
+                    if (hUp.Contains("FECHA") && (hUp.Contains("FRA") || hUp.Contains("FACTURA")))
+                        cFechaFra = c;
+                }
+            }
+
+            // ==== Índice de Prinex por clave simple (bloque numérico largo) ====
             var prinex = new Dictionary<string, (string Display, decimal Importe)>(StringComparer.Ordinal);
+            // Info extendida por fila para repesca (aquí podemos ser más generosos)
+            var prinexRows = new List<(string Key, string RawFra, string ProviderNorm, string ProviderDisplay, string ConceptNorm, string ConceptDisplay, object? FechaRaw, decimal Importe)>();
+
             int lastRow = ws.LastRowUsed()?.RowNumber() ?? headerRow;
 
             for (int r = headerRow + 1; r <= lastRow; r++)
             {
-                var raw = ws.Cell(r, cFra).Value;
-                var token = ExtractNumToken(raw);
-                var mk = MakeMatchKey(token);
-                if (string.IsNullOrEmpty(mk)) continue;
+                var numRaw = ws.Cell(r, cFra).GetString();
+                var key = SimpleInvoiceKey(numRaw); // sigue siendo estricta (bloque numérico largo)
 
-                decimal importe = cImporte > 0 ? SafeNumber(ws.Cell(r, cImporte).Value) : 0m;
-                string display = MakeDisplayKey(token);
+                decimal importe = 0m;
+                if (cImporte > 0)
+                {
+                    try
+                    {
+                        importe = SafeNumber(ws.Cell(r, cImporte).Value);
+                    }
+                    catch
+                    {
+                        // Si el importe da problemas, lo dejamos a 0 pero no rompemos el contraste
+                        importe = 0m;
+                    }
+                }
 
-                if (!prinex.ContainsKey(mk))
-                    prinex[mk] = (display, importe);
+                string provDisplay = cProveedor > 0 ? ws.Cell(r, cProveedor).GetString().Trim() : string.Empty;
+                string provNorm = RemoveDiacritics(provDisplay).ToUpperInvariant();
+
+                string conceptDisplay = cConcepto > 0 ? ws.Cell(r, cConcepto).GetString().Trim() : string.Empty;
+                string conceptNorm = RemoveDiacritics(conceptDisplay).ToUpperInvariant();
+
+                object? fechaRaw = cFechaFra > 0 ? (object?)ws.Cell(r, cFechaFra).Value : null;
+
+                // Para la pesca principal (lista "En Prinex pero sin PDF") mantenemos la clave estricta
+                if (!string.IsNullOrEmpty(key) && !prinex.ContainsKey(key))
+                {
+                    prinex[key] = (numRaw.Trim(), importe);
+                }
+
+                // Para las repescas SIEMPRE guardamos la fila,
+                // aunque SimpleInvoiceKey no haya encontrado un bloque ≥5 dígitos (key vacío)
+                prinexRows.Add((key ?? string.Empty,
+                                numRaw.Trim(),
+                                provNorm,
+                                provDisplay,
+                                conceptNorm,
+                                conceptDisplay,
+                                fechaRaw,
+                                importe));
             }
 
+
+            // ==== PDFs: PRIMERA PASADA (NO se toca la lógica de clave simple) ====
             var pdfKeys = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            // Pendientes para repesca (solo NO encontrados en la primera pasada)
+            var pendientes = new List<(CuadreFile? Pdf, string? Name, string? BaseName, string? FaltanteMsg)>();
+
 
             foreach (var pdf in pdfFiles)
             {
                 var name = pdf?.Name ?? string.Empty;
                 var baseName = Path.GetFileNameWithoutExtension(name) ?? string.Empty;
 
-                var token = ExtractNumToken(baseName);
-                var mk = MakeMatchKey(token);
-
-                if (string.IsNullOrEmpty(mk))
+                var key = SimpleInvoiceKey(baseName);
+                if (string.IsNullOrEmpty(key))
                 {
-                    result.Faltantes.Add($"{name} → no se ha podido extraer número de factura");
+                    // No se pudo extraer número de factura → candidato a repesca
+                    pendientes.Add((pdf, name, baseName, $"{name} → No constan cadenas válidas"));
                     continue;
                 }
 
-                pdfKeys[mk] = name;
+                pdfKeys[key] = name;
 
-                if (prinex.TryGetValue(mk, out var info))
+                if (prinex.TryGetValue(key, out var info))
                 {
+                    var tokenFactura = $"<em>{key}</em> (factura)";
+
                     result.Coincidencias.Add(new PdfCoincidencia
                     {
                         Documento = name,
-                        CoincidenciaDetectada = $"Coincidencia en Prinex ({info.Display}, {info.Importe:0.00} €)"
+                        CoincidenciaDetectada = $"Cadena {tokenFactura}"
                     });
                 }
+
+
+
+
                 else
                 {
-                    result.Faltantes.Add(name);
+                    // No encontrado en Prinex por clave simple → candidato a repesca
+                    // Motivo por defecto: no se han encontrado coincidencias
+                    pendientes.Add((pdf, name, baseName, $"{name} → No se han encontrado coincidencias"));
                 }
+
+            }
+            
+
+            // ==== SEGUNDA PASADA: REPESCA SOLO SOBRE 'pendientes' ====
+            if (pendientes.Count > 0 && prinexRows.Count > 0 && cProveedor > 0)
+            {
+                var stillFaltantes = new List<string>();
+
+                foreach (var item in pendientes)
+                {
+                    var name = item.Name ?? string.Empty;
+                    var baseName = item.BaseName ?? string.Empty;
+                    var faltMsg = item.FaltanteMsg;
+
+                    // NUEVO: ya no recortamos por el primer '_'; usamos todo el nombre
+                    var provTextNorm = RemoveDiacritics(baseName).ToUpperInvariant();
+
+                    // Si el nombre del archivo contiene "MTM", lo tratamos como si incluyera "MOMENTUM REAL ESTATE S.L."
+                    if (provTextNorm.Contains("MTM"))
+                    {
+                        provTextNorm = provTextNorm.Replace("MTM", "MOMENTUM REAL ESTATE");
+                    }
+
+
+
+
+                    // Tokens base de proveedor: bloques A–Z de longitud ≥ 5
+                    // Tokens base de proveedor:
+                    //  - bloques A–Z de longitud ≥5
+                    //  - o bloques de 3 letras entre guiones o underscores (ej: _WSP_ o -WSP-)
+                    var provTokensBase = Regex.Matches(provTextNorm, @"[A-Z]{5,}")
+                                              .Cast<Match>()
+                                              .Select(m => m.Value)
+                                              .ToList();
+
+                    var provTokens3 = Regex.Matches(provTextNorm, @"(?<=^|[-_])[A-Z]{3}(?=$|[-_])")
+                                            .Cast<Match>()
+                                            .Select(m => m.Value)
+                                            .ToList();
+
+                    var allProvTokens = provTokensBase
+                        .Concat(provTokens3)
+                        .Distinct()
+                        .ToList();
+
+                    if (allProvTokens.Count == 0)
+                    {
+                        // Sin tokens de proveedor → no hay repesca posible
+                        stillFaltantes.Add(faltMsg ?? string.Empty);
+                        continue;
+                    }
+
+                    // De cada bloque sacamos TODAS las subcadenas de longitud >= 5 (solo para los ≥5)
+                    const int MIN_PROV_MATCH = 5;
+                    var provTokens = allProvTokens
+                        .SelectMany(tok =>
+                        {
+                            var subs = new List<string>();
+                            if (tok.Length < MIN_PROV_MATCH) return subs;
+
+                            for (int len = MIN_PROV_MATCH; len <= tok.Length; len++)
+                            {
+                                for (int i = 0; i <= tok.Length - len; i++)
+                                {
+                                    subs.Add(tok.Substring(i, len));
+                                }
+                            }
+
+                            return subs;
+                        })
+                        .Distinct()
+                        .OrderByDescending(s => s.Length)
+                        .ToList();
+
+                    // Si solo hay tokens de 3 letras entre guiones, los mantenemos tal cual
+                    provTokens.AddRange(provTokens3);
+
+
+                    
+
+                    // 2.2. Filtrar filas candidatas por proveedor
+                    //    Coincidencia si ALGUNA subcadena de 5 letras del nombre del PDF
+                    //    está contenida en el nombre normalizado del proveedor en Prinex.
+                    var candidatosProveedor = prinexRows
+                        .Where(pr =>
+                            !string.IsNullOrEmpty(pr.ProviderNorm) &&
+                            provTokens.Any(tok => pr.ProviderNorm.Contains(tok)))
+                        .ToList();
+
+
+                    if (candidatosProveedor.Count == 0)
+                    {
+                        stillFaltantes.Add(faltMsg ?? $"{name} → No se han encontrado coincidencias");
+
+
+                        continue;
+                    }
+
+                    // 2.3. Buscar fragmentos numéricos (≥ 3 dígitos) del Nº factura dentro del nombre del PDF
+                    var candidatosFinal = new List<(string Key, string RawFra, string ProviderNorm, string ProviderDisplay, string ConceptNorm, string ConceptDisplay, object? FechaRaw, decimal Importe)>();
+
+
+
+                    foreach (var pr in candidatosProveedor)
+                    {
+                        var numMatches = Regex.Matches(pr.RawFra ?? string.Empty, @"\d{3,}");
+                        bool anyFrag = false;
+                        foreach (Match m in numMatches)
+                        {
+                            var frag = m.Value;
+
+                            // Excluir años típicos: 2024, 2025, 2026, 2027
+                            if (frag == "2024" || frag == "2025" || frag == "2026" || frag == "2027")
+                                continue;
+
+                            if (!string.IsNullOrEmpty(frag) &&
+                                baseName.IndexOf(frag, StringComparison.Ordinal) >= 0)
+                            {
+                                anyFrag = true;
+                                break;
+                            }
+                        }
+                        if (anyFrag)
+                        {
+                            bool isProv3 = provTokens3.Any(tok => pr.ProviderNorm.Contains(tok));
+
+                            if (isProv3)
+                            {
+                                // Para proveedores de 3 letras (entre guiones o "_") exigimos también coincidencia exacta de fecha (yyMMdd)
+                                var fechaTokens = Regex.Matches(baseName, @"(?<!\d)(\d{6})(?!\d)")
+                                                       .Cast<Match>()
+                                                       .Select(m => m.Groups[1].Value)
+                                                       .Where(ft =>
+                                                       {
+                                                           if (ft.Length != 6) return false;
+                                                           if (!int.TryParse(ft.Substring(0, 2), out var yy)) return false;
+                                                           if (!int.TryParse(ft.Substring(2, 2), out var mm)) return false;
+                                                           if (!int.TryParse(ft.Substring(4, 2), out var dd)) return false;
+                                                           return mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31;
+                                                       })
+                                                       .ToList();
+
+                                if (fechaTokens.Count > 0 && pr.FechaRaw is DateTime fecha)
+                                {
+                                    var tokenFecha = fecha.ToString("yyMMdd");
+                                    if (fechaTokens.Contains(tokenFecha))
+                                        candidatosFinal.Add(pr);
+                                }
+                            }
+                            else
+                            {
+                                candidatosFinal.Add(pr);
+                            }
+                        }
+
+
+                    }
+
+                    if (candidatosFinal.Count == 0)
+                    {
+                        // REPESCA EXTRA:
+                        //  - Coincidencia de concepto (≥5 letras seguidas en nombre de archivo y en concepto)
+                        //  - Coincidencia de proveedor (≥4 letras seguidas en nombre de archivo y en proveedor)
+                        //  - Coincidencia de fragmento numérico del nº de factura (≥3 dígitos) en el nombre del PDF
+
+                        var tokensConcept = Regex.Matches(provTextNorm, @"[A-Z]{4,}")
+ .Cast<Match>()
+ .Select(m => m.Value)
+ .Distinct()
+ .ToList();
+
+                        var tokens4 = Regex.Matches(provTextNorm, @"[A-Z]{4,}")
+                                           .Cast<Match>()
+                                           .Select(m => m.Value)
+                                           .Distinct()
+                                           .ToList();
+
+                        // NUEVO: tokens de 3 letras SOLO si van entre guiones o underscores (ej: _WSP_)
+                        var tokens3BetweenGuions = Regex.Matches(provTextNorm, @"(?<=^|[-_])[A-Z]{3}(?=$|[-_])")
+                                                        .Cast<Match>()
+                                                        .Select(m => m.Value)
+                                                        .Distinct()
+                                                        .ToList();
+
+
+                        var candidatosConcepto = new List<(string Key, string RawFra, string ProviderNorm, string ProviderDisplay, string ConceptNorm, string ConceptDisplay, object? FechaRaw, decimal Importe, string ConceptToken, string ProvToken, string NumFrag)>();
+
+                        foreach (var pr in prinexRows)
+                        {
+                            if (string.IsNullOrEmpty(pr.ConceptNorm) || string.IsNullOrEmpty(pr.ProviderNorm))
+                                continue;
+
+                            // 1) token de concepto (≥4 letras) presente en Concepto
+                            string conceptTok = tokensConcept.FirstOrDefault(t => pr.ConceptNorm.Contains(t)) ?? string.Empty;
+                            if (string.IsNullOrEmpty(conceptTok))
+                                continue;
+
+
+
+                            // 2) token de proveedor (≥4 letras) presente en Nombre proveedor
+                            string provTok = tokens4.FirstOrDefault(t => pr.ProviderNorm.Contains(t)) ?? string.Empty;
+                            if (string.IsNullOrEmpty(provTok))
+                                continue;
+
+
+                            // 3) fragmento numérico (≥3 dígitos) del nº de factura presente en el nombre del PDF
+                            string numFrag = string.Empty;
+                            var numMatches2 = Regex.Matches(pr.RawFra ?? string.Empty, @"\d{3,}");
+                            foreach (Match m2 in numMatches2)
+                            {
+                                var frag2 = m2.Value;
+                                if (string.IsNullOrEmpty(frag2))
+                                    continue;
+
+                                // Intento directo
+                                string fragToSearch = frag2;
+                                if (baseName.IndexOf(fragToSearch, StringComparison.Ordinal) < 0)
+                                {
+                                    // Si viene con ceros delante (0000164) probamos sin ceros (164)
+                                    var fragNoZeros = frag2.TrimStart('0');
+                                    if (fragNoZeros.Length >= 3)
+                                        fragToSearch = fragNoZeros;
+                                }
+
+                                if (!string.IsNullOrEmpty(fragToSearch) &&
+                                    baseName.IndexOf(fragToSearch, StringComparison.Ordinal) >= 0)
+                                {
+                                    numFrag = fragToSearch;
+                                    break;
+                                }
+                            }
+                            if (string.IsNullOrEmpty(numFrag))
+                                continue;
+
+                            candidatosConcepto.Add((
+                                pr.Key,
+                                pr.RawFra ?? string.Empty,
+                                pr.ProviderNorm ?? string.Empty,
+                                pr.ProviderDisplay ?? string.Empty,
+                                pr.ConceptNorm ?? string.Empty,
+                                pr.ConceptDisplay ?? string.Empty,
+                                pr.FechaRaw,
+                                pr.Importe,
+                                conceptTok,
+                                provTok,
+                                numFrag ?? string.Empty));
+
+                        }
+
+                        if (candidatosConcepto.Count == 0)
+                        {
+                            // ==== REPESCA POR FECHA (YYMMDD en nombre del PDF) ====
+
+                            var candidatosFecha =
+                                new List<(string Key, string RawFra, string ProviderNorm, string ProviderDisplay,
+                                          object? FechaRaw, decimal Importe, string ProvToken, string NumFrag, string FechaToken)>();
+
+                            // Tokens de fecha (YYMMDD válidos) que aparezcan en el nombre del PDF
+                            // (permitimos que estén pegados a guiones/underscores/letras, solo exigimos que
+                            // no haya dígitos justo antes ni justo después)
+                            var fechaTokens = Regex.Matches(baseName, @"(?<!\d)(\d{6})(?!\d)")
+                                                   .Cast<Match>()
+                                                   .Select(m => m.Groups[1].Value)
+                                                   .Where(ft =>
+                                                   {
+                                                       if (ft.Length != 6) return false;
+                                                       if (!int.TryParse(ft.Substring(0, 2), out var yyTok)) return false;
+                                                       if (!int.TryParse(ft.Substring(2, 2), out var mmTok)) return false;
+                                                       if (!int.TryParse(ft.Substring(4, 2), out var ddTok)) return false;
+                                                       return mmTok >= 1 && mmTok <= 12 && ddTok >= 1 && ddTok <= 31;
+                                                   })
+                                                   .ToList();
+
+
+                            if (fechaTokens.Count > 0)
+                            {
+                                foreach (var pr in prinexRows)
+                                {
+                                    // 1) token de proveedor:
+                                    //    - primero intentamos tokens de ≥4 letras
+                                    //    - si no hay match, permitimos tokens de 3 letras SOLO si vienen entre guiones/underscores (tokens3BetweenGuions)
+                                    string provTok2 = tokens4.FirstOrDefault(t => pr.ProviderNorm.Contains(t)) ?? string.Empty;
+
+                                    if (string.IsNullOrEmpty(provTok2) && tokens3BetweenGuions.Count > 0)
+                                    {
+                                        provTok2 = tokens3BetweenGuions.FirstOrDefault(t => pr.ProviderNorm.Contains(t)) ?? string.Empty;
+                                    }
+
+                                    if (string.IsNullOrEmpty(provTok2))
+                                        continue;
+
+
+                                    // 2) fragmento numérico (≥3 dígitos) del nº de factura presente en el nombre del PDF
+                                    string numFrag2 = string.Empty;
+                                    var numMatches3 = Regex.Matches(pr.RawFra ?? string.Empty, @"\d{3,}");
+                                    foreach (Match m3 in numMatches3)
+                                    {
+                                        var fragAll = m3.Value;                  // ej: "000253000089"
+                                        var fragNoZeros = fragAll.TrimStart('0'); // "253000089" (o vacío)
+
+                                        var candidatesNums = new List<string>();
+
+                                        if (!string.IsNullOrEmpty(fragNoZeros) && fragNoZeros.Length >= 3)
+                                        {
+                                            // candidato principal: todo el bloque sin ceros iniciales
+                                            candidatesNums.Add(fragNoZeros);
+
+                                            // prefijo de 3 dígitos (ej: "253") para casos tipo 000253000089
+                                            candidatesNums.Add(fragNoZeros.Substring(0, 3));
+
+                                            // opcional: prefijo de 4 dígitos, por si en el nombre hay algo como 2530…
+                                            if (fragNoZeros.Length >= 4)
+                                                candidatesNums.Add(fragNoZeros.Substring(0, 4));
+                                        }
+                                        else
+                                        {
+                                            // bloque tal cual si no hay suficiente tras quitar ceros
+                                            candidatesNums.Add(fragAll);
+                                        }
+
+                                        foreach (var cand in candidatesNums.Distinct())
+                                        {
+                                            if (cand.Length < 3)
+                                                continue;
+
+                                            // excluir años sueltos 2024–2027
+                                            if (cand == "2024" || cand == "2025" || cand == "2026" || cand == "2027")
+                                                continue;
+
+                                            if (baseName.IndexOf(cand, StringComparison.Ordinal) >= 0)
+                                            {
+                                                numFrag2 = cand;
+                                                break;
+                                            }
+                                        }
+
+                                        if (!string.IsNullOrEmpty(numFrag2))
+                                            break;
+                                    }
+                                    if (string.IsNullOrEmpty(numFrag2))
+                                        continue;
+
+
+                                    // 3) fecha exacta: Fecha Fra. debe coincidir con algún YYMMDD del nombre
+                                    DateTime fechaPrinex;
+                                    if (pr.FechaRaw is DateTime dt3)
+                                        fechaPrinex = dt3;
+                                    else if (!DateTime.TryParse(Convert.ToString(pr.FechaRaw), out fechaPrinex))
+                                        continue;
+
+                                    var tokenFecha = fechaPrinex.ToString("yyMMdd"); // ej. 05/11/2025 -> "251105"
+                                    if (!fechaTokens.Contains(tokenFecha))
+                                        continue;
+
+                                    candidatosFecha.Add((
+                                        pr.Key ?? string.Empty,
+                                        pr.RawFra ?? string.Empty,
+                                        pr.ProviderNorm ?? string.Empty,
+                                        pr.ProviderDisplay ?? string.Empty,
+                                        pr.FechaRaw,
+                                        pr.Importe,
+                                        provTok2,
+                                        numFrag2,
+                                        tokenFecha));
+                                }
+                            }
+
+                            if (candidatosFecha.Count == 0)
+                            {
+                                // Ni repesca simple, ni por concepto, ni por fecha -> sigue siendo faltante
+                                stillFaltantes.Add(faltMsg ?? string.Empty);
+                                continue;
+                            }
+
+                            // Elegimos la primera candidata por fecha (el filtro ya es muy estricto)
+                            var ganadorFecha = candidatosFecha[0];
+
+                            var fechaHtml = $"<em>{ganadorFecha.FechaToken}</em> (fecha)";
+                            var provHtmlF = $"<em>{ganadorFecha.ProvToken}</em> (proveedor)";
+                            var fraHtmlF = $"<em>{ganadorFecha.NumFrag}</em> (factura)";
+
+                            string textoFecha = $"Cadenas {fechaHtml}, {provHtmlF} y {fraHtmlF}";
+
+                            result.Coincidencias.Add(new PdfCoincidencia
+                            {
+                                Documento = name,
+                                CoincidenciaDetectada = textoFecha
+                            });
+
+                            if (!string.IsNullOrEmpty(ganadorFecha.Key) && !pdfKeys.ContainsKey(ganadorFecha.Key))
+                            {
+                                pdfKeys[ganadorFecha.Key] = name;
+                            }
+
+                            continue;
+                        }
+
+
+                        // Elegir candidata ganadora (mismo criterio de fecha que arriba)
+                        (bool okYmd2, int yy2, int mm2, int dd2) = ExtractYMDFromFileName(name);
+                        var ganadorConcepto = candidatosConcepto[0];
+
+                        if (candidatosConcepto.Count > 1 && okYmd2)
+                        {
+                            var filtrados2 = candidatosConcepto
+                                .Where(pr => pr.FechaRaw != null && IsSameMonth(pr.FechaRaw!, yy2, mm2))
+                                .ToList();
+
+                            if (filtrados2.Count > 0)
+                                ganadorConcepto = filtrados2[0];
+                        }
+
+                        // Subcadenas tal cual aparecen en el nombre del PDF (afterPrefix)
+                        string conceptMatch = ganadorConcepto.ConceptToken;
+                        string provMatch2 = ganadorConcepto.ProvToken;
+                        string numMatch = ganadorConcepto.NumFrag;
+
+                        var conceptIdx = provTextNorm.IndexOf(conceptMatch, StringComparison.Ordinal);
+                        if (conceptIdx >= 0 && conceptIdx + conceptMatch.Length <= baseName.Length)
+                            conceptMatch = baseName.Substring(conceptIdx, conceptMatch.Length);
+
+                        var provIdx2 = provTextNorm.IndexOf(provMatch2, StringComparison.Ordinal);
+                        if (provIdx2 >= 0 && provIdx2 + provMatch2.Length <= baseName.Length)
+                            provMatch2 = baseName.Substring(provIdx2, provMatch2.Length);
+
+
+                        var conceptHtml = $"<em>{conceptMatch}</em> (<strong>concepto</strong>)";
+                        var provHtml2 = $"<em>{provMatch2}</em> (<strong>proveedor</strong>)";
+                        var fraHtml2 = $"<em>{numMatch}</em> (<strong>factura</strong>)";
+
+                        var textoCoincidenciaExtra = $"Cadenas {conceptHtml}, {provHtml2} y {fraHtml2}";
+
+                        result.Coincidencias.Add(new PdfCoincidencia
+                        {
+                            Documento = name,
+                            CoincidenciaDetectada = textoCoincidenciaExtra
+                        });
+
+                        if (!string.IsNullOrEmpty(ganadorConcepto.Key) && !pdfKeys.ContainsKey(ganadorConcepto.Key))
+                        {
+                            pdfKeys[ganadorConcepto.Key] = name;
+                        }
+
+                        // Este PDF se rescata, no va a faltantes
+                        continue;
+                    }
+
+
+                    // 2.4. Elegir candidata ganadora
+                    (bool okYmd, int yy, int mm, int dd) = ExtractYMDFromFileName(name);
+                    (string Key, string RawFra, string ProviderNorm, string ProviderDisplay, string ConceptNorm, string ConceptDisplay, object? FechaRaw, decimal Importe) ganador;
+
+
+
+                    if (candidatosFinal.Count == 1 || !okYmd)
+                    {
+                        ganador = candidatosFinal[0];
+                    }
+                    else
+                    {
+                        var filtrados = candidatosFinal
+                            .Where(pr => IsSameMonth(pr.FechaRaw!, yy, mm))
+                            .ToList();
+
+                        ganador = filtrados.Count > 0 ? filtrados[0] : candidatosFinal[0];
+                    }
+
+                    // 2.5. Añadir a Coincidencias (repesca) y marcar clave como vista
+                    string fechaStr;
+                    if (ganador.FechaRaw is DateTime dt)
+                        fechaStr = dt.ToString("dd/MM/yyyy");
+                    else
+                        fechaStr = Convert.ToString(ganador.FechaRaw) ?? string.Empty;
+
+                    // Detectar fragmento numérico concreto de la factura presente en el nombre del PDF
+                    string matchedFrag = string.Empty;
+                    var fragMatches = Regex.Matches(ganador.RawFra ?? string.Empty, @"\d{3,}");
+                    foreach (Match m in fragMatches)
+                    {
+                        var frag = m.Value;
+
+                        // Excluir años típicos: 2024, 2025, 2026, 2027
+                        if (frag == "2024" || frag == "2025" || frag == "2026" || frag == "2027")
+                            continue;
+
+                        if (!string.IsNullOrEmpty(frag) &&
+                            baseName.IndexOf(frag, StringComparison.Ordinal) >= 0)
+                        {
+                            matchedFrag = frag;
+                            break;
+                        }
+                    }
+
+
+                    // Mensaje minimalista: proveedor + fragmento de número
+                    // SOLO mostramos lo que aparece EXACTAMENTE en el nombre del PDF.
+
+                    // 1) Buscar subcadena del nombre del PDF que realmente coincide con el proveedor
+                    string provMatch = string.Empty;
+
+                    // provTokens / provTextNorm / afterPrefix ya están calculados más arriba
+                    foreach (var tok in provTokens.OrderByDescending(t => t.Length))
+                    {
+                        if (string.IsNullOrEmpty(tok))
+                            continue;
+
+                        // Debe existir en el proveedor normalizado
+                        if (!ganador.ProviderNorm.Contains(tok))
+                            continue;
+
+                        // Y también en el nombre completo del PDF normalizado (sin recortar)
+                        var idx = provTextNorm.IndexOf(tok, StringComparison.Ordinal);
+                        if (idx >= 0 && idx + tok.Length <= baseName.Length)
+                        {
+                            // Subcadena tal cual aparece en el nombre completo del archivo
+                            provMatch = baseName.Substring(idx, tok.Length);
+                            break;
+                        }
+
+                    }
+
+                    // 2) Construir HTML sólo con lo que ha coincidido
+                    string textoCoincidencia;
+                    string? provHtml = null;
+                    string? fraHtml = null;
+
+                    if (!string.IsNullOrEmpty(provMatch))
+                        provHtml = $"<em>{provMatch}</em> (<strong>proveedor</strong>)";
+
+                    if (!string.IsNullOrEmpty(matchedFrag))
+                        fraHtml = $"<em>{matchedFrag}</em> (<strong>factura</strong>)";
+
+                    if (provHtml != null && fraHtml != null)
+                    {
+                        textoCoincidencia = $"Cadenas {provHtml} y {fraHtml}";
+                    }
+                    else if (provHtml != null)
+                    {
+                        textoCoincidencia = $"Cadena {provHtml}";
+                    }
+                    else if (fraHtml != null)
+                    {
+                        textoCoincidencia = $"Cadena {fraHtml}";
+                    }
+                    else
+                    {
+                        // Fallback extremo (no debería darse casi nunca)
+                        textoCoincidencia = "Coincidencia por proveedor / nº factura";
+                    }
+
+                    result.Coincidencias.Add(new PdfCoincidencia
+                    {
+                        Documento = name,
+                        CoincidenciaDetectada = textoCoincidencia
+                    });
+
+
+
+
+
+
+
+                    if (!string.IsNullOrEmpty(ganador.Key) && !pdfKeys.ContainsKey(ganador.Key))
+                    {
+                        // Para que no aparezca en "En Prinex pero sin PDF"
+                        pdfKeys[ganador.Key] = name;
+                    }
+                    // IMPORTANTE: este PDF no se añade a Faltantes (se rescata)
+                }
+
+                // === REPESCA 4: IMPORTE + (PROVEEDOR o Nº FACTURA o CONCEPTO) ===
+                foreach (var item in pendientes)
+                {
+                    var name = item.Name ?? string.Empty;
+                    var baseName = item.BaseName ?? string.Empty;
+                    var provTextNorm = RemoveDiacritics(baseName).ToUpperInvariant();
+
+                    // Alias: MTM → MOMENTUM REAL ESTATE (para que matche con el proveedor de Prinex)
+                    if (provTextNorm.Contains("MTM"))
+                    {
+                        provTextNorm = provTextNorm.Replace("MTM", "MOMENTUM REAL ESTATE");
+                    }
+
+                    // Buscar cadenas tipo importe en el nombre del PDF (2.420, 163.347.20, 3.084.741.33, etc.)
+                    var importesDetectados = Regex.Matches(baseName, @"\d[\d\.]{3,}")
+                                                  .Cast<Match>()
+                                                  .Select(m => m.Value)
+                                                  .ToList();
+
+                    if (importesDetectados.Count == 0) continue;
+
+                    bool encontrado = false;
+
+                    foreach (var pr in prinexRows)
+                    {
+                        if (pr.Importe <= 0) continue;
+
+                        foreach (var impTxt in importesDetectados)
+                        {
+                            // Limpieza previa: quitamos puntos/comas “sueltos” al final: "3.084.741.33." → "3.084.741.33"
+                            var impTxtClean = impTxt.Trim().TrimEnd('.', ',');
+
+                            // Normalizar importe tipo "3.084.741.33" → "3084741,33"
+                            var texto = impTxtClean;
+                            var idxUltPunto = texto.LastIndexOf('.');
+                            if (idxUltPunto > 0)
+                            {
+                                var miles = texto.Substring(0, idxUltPunto).Replace(".", "");
+                                var dec = texto.Substring(idxUltPunto + 1);
+                                texto = $"{miles},{dec}";
+                            }
+
+                            if (!decimal.TryParse(texto, NumberStyles.Any, new CultureInfo("es-ES"), out var impParsed))
+                                continue;
+
+                            // Normalizamos también los puntos como separadores de miles o decimales
+                            string normalizado = impTxtClean.Replace(".", "");
+                            // --- Normalización avanzada de importe detectado en nombre de PDF ---
+                            // Limpieza robusta de importes: admite cadenas como "3.084.741.33" o "1.234.567.890.12"
+                            var impClean = impTxtClean.Replace(",", "."); // unificamos comas a puntos
+                            normalizado = Regex.Replace(impClean, @"[^0-9.]", ""); // mantenemos solo números y puntos
+
+
+                            // Si hay más de un punto y los dos últimos dígitos del último bloque son decimales, conservamos solo el último punto
+                            var partes = normalizado.Split('.');
+                            if (partes.Length > 2)
+                            {
+                                string last = partes.Last();
+                                if (last.Length == 2) // dos decimales
+                                    normalizado = string.Join("", partes.Take(partes.Length - 1)) + "," + last;
+                                else
+                                    normalizado = string.Join("", partes); // sin decimales, quitar todos los puntos
+                            }
+                            else if (partes.Length == 2 && partes.Last().Length == 2)
+                            {
+                                normalizado = partes[0] + "," + partes[1];
+                            }
+
+
+                            if (string.IsNullOrWhiteSpace(normalizado))
+                                continue;
+
+                            // Reglas:
+                            //  - Si hay varios puntos, el último se toma como separador decimal (2 dígitos si los hay)
+                            //  - Los demás puntos se eliminan (separadores de miles)
+                            int lastDot = normalizado.LastIndexOf('.');
+                            if (lastDot != -1 && lastDot + 1 < normalizado.Length)
+                            {
+                                string decPart = normalizado.Substring(lastDot + 1);
+                                if (decPart.Length == 2)
+                                {
+                                    normalizado = normalizado.Remove(lastDot, 1).Insert(lastDot, ",");
+                                }
+                                else
+                                {
+                                    normalizado = normalizado.Remove(lastDot, 1); // no decimal real, quitarlo
+                                }
+                            }
+
+                            // Quitamos cualquier otro punto sobrante
+                            normalizado = normalizado.Replace(".", "");
+
+                            if (decimal.TryParse(normalizado, NumberStyles.Any, new CultureInfo("es-ES"), out var impPdf))
+                            {
+                                // Si el PDF tiene importe sin decimales y el Excel con decimales, igualarlos
+                                var diff = Math.Abs(Math.Round(pr.Importe, 2) - Math.Round(impPdf, 2));
+                                if (diff > 0.01m)
+                                {
+                                    // También probamos la conversión sin decimales exactos (por ejemplo 2420 == 2420,00)
+                                    if (Math.Abs(Math.Round(pr.Importe, 0) - Math.Round(impPdf, 0)) > 0)
+                                        continue;
+                                }
+                            }
+                            else
+                            {
+                                continue;
+                            }
+
+
+
+                            // Segunda coincidencia: proveedor, nº factura o concepto
+                            bool proveedorOk = !string.IsNullOrEmpty(pr.ProviderNorm) &&
+                                               (provTextNorm.Contains(pr.ProviderNorm.Substring(0, Math.Min(3, pr.ProviderNorm.Length))) ||
+                                                (provTextNorm.Contains("MOMENTUM") && pr.ProviderNorm.Contains("MOMENTUM")));
+
+                            bool facturaOk = !string.IsNullOrEmpty(pr.RawFra) &&
+                                             Regex.Matches(pr.RawFra, @"\d{3,}")
+                                                  .Cast<Match>()
+                                                  .Any(m => baseName.Contains(m.Value));
+
+                            bool conceptoOk = !string.IsNullOrEmpty(pr.ConceptNorm) &&
+                                              pr.ConceptNorm.Length >= 3 &&
+                                              provTextNorm.Contains(pr.ConceptNorm.Substring(0, 3));
+
+                            if (proveedorOk || facturaOk || conceptoOk)
+                            {
+                                string tipo = proveedorOk ? "proveedor" : facturaOk ? "factura" : "concepto";
+                                string valor = proveedorOk ? pr.ProviderDisplay :
+                                                facturaOk ? pr.RawFra : pr.ConceptDisplay;
+
+                                string textoCoinc = $"Cadenas <em>{impTxt}</em> (<strong>importe</strong>) y <em>{valor}</em> (<strong>{tipo}</strong>)";
+
+                                result.Coincidencias.Add(new PdfCoincidencia
+                                {
+                                    Documento = name,
+                                    CoincidenciaDetectada = textoCoinc
+                                });
+
+                                if (!string.IsNullOrEmpty(pr.Key) && !pdfKeys.ContainsKey(pr.Key))
+                                    pdfKeys[pr.Key] = name;
+
+                                encontrado = true;
+                                break;
+                            }
+                        }
+
+                        if (encontrado)
+                            break;
+                    }
+                }
+
+
+                // Faltantes definitivos = solo los que la repesca no ha rescatado
+                result.Faltantes.AddRange(stillFaltantes);
+
+            }
+            else
+            {
+                // Sin repesca (no hay proveedor o no hay pendientes) → Faltantes tal cual primera pasada
+                result.Faltantes.AddRange(pendientes.Select(p => p.FaltanteMsg ?? string.Empty));
+
             }
 
+            // 🔍 Post-procesado: eliminar de Faltantes los PDFs que SÍ tienen coincidencia
+            if (result.Faltantes.Count > 0 && result.Coincidencias.Count > 0)
+            {
+                var docsCoincidentes = new HashSet<string>(
+                    result.Coincidencias
+                          .Where(c => !string.IsNullOrWhiteSpace(c.Documento))
+                          .Select(c => c.Documento!.Trim()),
+                    StringComparer.OrdinalIgnoreCase
+                );
+
+                result.Faltantes = result.Faltantes
+                    .Where(msg =>
+                    {
+                        if (string.IsNullOrWhiteSpace(msg)) return false;
+
+                        // El nombre del PDF es lo que va antes del "→"
+                        var idx = msg.IndexOf('→');
+                        var nombreDoc = (idx >= 0 ? msg.Substring(0, idx) : msg).Trim();
+
+                        return !docsCoincidentes.Contains(nombreDoc);
+                    })
+                    .ToList();
+            }
+
+            // ==== En Prinex pero sin PDF (no se toca la forma de construcción) ====
             foreach (var kv in prinex)
             {
                 if (!pdfKeys.ContainsKey(kv.Key))
                 {
                     var info = kv.Value;
-                    result.Descuadres.Add(
-                        $"En Prinex pero sin PDF: {info.Display} ({info.Importe:0.00} €)");
+                    result.Descuadres.Add($"En Prinex pero sin PDF: {info.Display} ({info.Importe:0.00} €)");
                 }
             }
 
             return result;
+
         }
+
+        // Sobrecarga para compatibilidad con la llamada que pasa SociedadFiltro
+        private static PreviewPdfDto BuildPreviewFromPdfNamesAndExcel(
+            byte[] excelBytes,
+            List<CuadreFile> pdfFiles,
+            string? _ /*sociedadFiltro*/)
+        {
+            // De momento ignoramos el filtro y reutilizamos la lógica principal
+            return BuildPreviewFromPdfNamesAndExcel(excelBytes, pdfFiles);
+        }
+
+        private static string? SimpleInvoiceKey(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return null;
+
+            var cleaned = text.Replace(((char)160).ToString(), " ").Trim();
+
+            // Buscamos bloques de 5+ dígitos (números de factura típicos)
+            var matches = Regex.Matches(cleaned, @"\d{5,}");
+            if (matches.Count == 0)
+                return null;
+
+            // Nos quedamos con el bloque más largo (si hay empate, el primero)
+            var best = matches.Cast<Match>()
+                              .OrderByDescending(m => m.Value.Length)
+                              .First()
+                              .Value;
+
+            return best;
+        }
+
 
         // ============================================================
         // =================== ESTILO “CUTE PRO” ======================
@@ -961,7 +1861,7 @@ namespace FunctionApp1
 
             return 0m;
 
-            
+
         }
 
         private static bool IsSameMonth(object dt, int y, int m)
@@ -1202,12 +2102,12 @@ namespace FunctionApp1
             }
             return best;
         }
-    
-    // ============================================================
-// =============== CORS: DETECTAR ORIGEN PERMITIDO =============
-// ============================================================
 
-private static string? GetAllowedOrigin(HttpRequestData req)
+        // ============================================================
+        // =============== CORS: DETECTAR ORIGEN PERMITIDO =============
+        // ============================================================
+
+        private static string? GetAllowedOrigin(HttpRequestData req)
         {
             // Leer el Origin que viene desde el navegador
             var origin = req.Headers.TryGetValues("Origin", out var vals) ? vals.FirstOrDefault() : null;
@@ -1223,7 +2123,7 @@ private static string? GetAllowedOrigin(HttpRequestData req)
 
             return null; // si no está permitido, devolvemos null
         }
-    
-    
+
+
     }
 }
