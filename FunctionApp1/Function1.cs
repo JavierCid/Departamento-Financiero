@@ -52,6 +52,8 @@ namespace FunctionApp1
             public List<CuadreFile> Pdfs { get; set; } = new();
             public CuadreFile? Excel { get; set; }
             public string? SociedadFiltro { get; set; }
+            public string? PeriodoFiltro { get; set; } // "MM/YYYY" o "M/YYYY" o "YYYY-MM"
+
         }
 
 
@@ -281,7 +283,8 @@ namespace FunctionApp1
                 }
 
                 var excelBytes = Convert.FromBase64String(data.Excel.Base64);
-                var preview = BuildPreviewFromPdfNamesAndExcel(excelBytes, data.Pdfs, data.SociedadFiltro);
+                var preview = BuildPreviewFromPdfNamesAndExcel(excelBytes, data.Pdfs, data.SociedadFiltro, data.PeriodoFiltro);
+
 
 
                 var resp = req.CreateResponse(HttpStatusCode.OK);
@@ -650,8 +653,11 @@ namespace FunctionApp1
         // ============================================================
         // ======== LÓGICA CUADRE PDFs ↔ PRINEX (con repesca proveedor+número) ========
         private static PreviewPdfDto BuildPreviewFromPdfNamesAndExcel(
-            byte[] excelBytes,
-            List<CuadreFile> pdfFiles)
+    byte[] excelBytes,
+    List<CuadreFile> pdfFiles,
+    string? sociedadFiltro = null,
+    string? periodoFiltro = null)
+
         {
             var result = new PreviewPdfDto();
 
@@ -734,16 +740,94 @@ namespace FunctionApp1
                 }
             }
 
+            // Columna Sociedad (búsqueda flexible)
+            int cSociedad = FindHeaderCol(ws, headerRow, "Sociedad");
+            if (cSociedad == 0)
+            {
+                int lastCol = ws.LastColumnUsed()?.ColumnNumber() ?? 0;
+                for (int c = 1; c <= lastCol && cSociedad == 0; c++)
+                {
+                    var h = ws.Cell(headerRow, c).GetString();
+                    var hUp = RemoveDiacritics(h).ToUpperInvariant();
+                    if (hUp.Contains("SOCIEDAD"))
+                        cSociedad = c;
+                }
+            }
+
+
             // ==== Índice de Prinex por clave simple (bloque numérico largo) ====
             var prinex = new Dictionary<string, (string Display, decimal Importe)>(StringComparer.Ordinal);
             // Info extendida por fila para repesca (aquí podemos ser más generosos)
             var prinexRows = new List<(string Key, string RawFra, string ProviderNorm, string ProviderDisplay, string ConceptNorm, string ConceptDisplay, object? FechaRaw, decimal Importe)>();
 
+            // Meta por clave (para la pesca simple por key)
+            var prinexMetaByKey = new Dictionary<string, (string SocietyDisplay, object? FechaRaw)>(StringComparer.Ordinal);
+
+            // Meta por “huella” de fila (para repescas)
+            var prinexMetaByFp = new Dictionary<string, (string SocietyDisplay, object? FechaRaw)>(StringComparer.Ordinal);
+
+            // Qué fila acabó “ganando” para cada PDF encontrado
+            var matchMetaByDoc = new Dictionary<string, (string Key, string SocietyDisplay, object? FechaRaw)>(StringComparer.OrdinalIgnoreCase);
+
+            string RowFp(string rawFra, string provNorm, object? fechaRaw, decimal importe)
+            {
+                string f = "";
+                if (TryGetDate(fechaRaw, out var dt)) f = dt.ToString("yyyy-MM-dd");
+                else f = Convert.ToString(fechaRaw) ?? "";
+
+                var imp = Math.Round(importe, 2).ToString(CultureInfo.InvariantCulture);
+                return $"{(rawFra ?? "").Trim()}|{(provNorm ?? "").Trim()}|{f}|{imp}";
+            }
+
+            void RememberMatch(string doc, string key, string rawFra, string provNorm, object? fechaRaw, decimal importe)
+            {
+                string socDisp = "";
+                object? fechaReal = fechaRaw;
+
+                if (!string.IsNullOrEmpty(key) && prinexMetaByKey.TryGetValue(key, out var km))
+                {
+                    socDisp = km.SocietyDisplay;
+                    fechaReal = km.FechaRaw;
+                }
+                else
+                {
+                    var fp = RowFp(rawFra, provNorm, fechaRaw, importe);
+                    if (prinexMetaByFp.TryGetValue(fp, out var rm))
+                    {
+                        socDisp = rm.SocietyDisplay;
+                        fechaReal = rm.FechaRaw;
+                    }
+                }
+
+                matchMetaByDoc[doc] = (key ?? "", socDisp, fechaReal);
+            }
+
+
             int lastRow = ws.LastRowUsed()?.RowNumber() ?? headerRow;
+
+            // --- preparar filtros ---
+            string socKey = string.Empty;
+            if (!string.IsNullOrWhiteSpace(sociedadFiltro))
+            {
+                var s = RemoveDiacritics(sociedadFiltro).Trim().ToUpperInvariant();
+                socKey = s.Length >= 3 ? s.Substring(0, 3) : s;
+            }
+
+            bool hasPeriodo = TryParsePeriodo(periodoFiltro, out var perY, out var perM);
+
+            // si vienen filtros pero no hay columnas, mejor fallar claro
+            if (!string.IsNullOrEmpty(socKey) && cSociedad == 0)
+                throw new InvalidOperationException("Filtro Sociedad informado pero no se encuentra la columna 'Sociedad' en el Excel.");
+            if (hasPeriodo && cFechaFra == 0)
+                throw new InvalidOperationException("Filtro Periodo informado pero no se encuentra la columna 'Fecha Fra.' en el Excel.");
 
             for (int r = headerRow + 1; r <= lastRow; r++)
             {
+                // NO filtrar aquí. Los filtros (Sociedad/Periodo) se aplican AL FINAL solo sobre coincidencias encontradas.
+
+
                 var numRaw = ws.Cell(r, cFra).GetString();
+
                 var key = SimpleInvoiceKey(numRaw); // sigue siendo estricta (bloque numérico largo)
 
                 decimal importe = 0m;
@@ -775,6 +859,18 @@ if (!string.IsNullOrEmpty(provNorm) && provNorm.Contains("MOMENTUM"))
                 string conceptNorm = RemoveDiacritics(conceptDisplay).ToUpperInvariant();
 
                 object? fechaRaw = cFechaFra > 0 ? (object?)ws.Cell(r, cFechaFra).Value : null;
+
+                string socDisplay = cSociedad > 0 ? ws.Cell(r, cSociedad).GetString().Trim() : string.Empty;
+
+                // meta por key (pesca simple)
+                if (!string.IsNullOrEmpty(key) && !prinexMetaByKey.ContainsKey(key))
+                    prinexMetaByKey[key] = (socDisplay, fechaRaw);
+
+                // meta por fingerprint (repescas)
+                var fpRow = RowFp(numRaw.Trim(), provNorm, fechaRaw, importe);
+                if (!prinexMetaByFp.ContainsKey(fpRow))
+                    prinexMetaByFp[fpRow] = (socDisplay, fechaRaw);
+
 
                 // Para la pesca principal (lista "En Prinex pero sin PDF") mantenemos la clave estricta
                 if (!string.IsNullOrEmpty(key) && !prinex.ContainsKey(key))
@@ -826,6 +922,8 @@ if (!string.IsNullOrEmpty(provNorm) && provNorm.Contains("MOMENTUM"))
                         Documento = name,
                         CoincidenciaDetectada = $"Cadena {tokenFactura}"
                     });
+                    RememberMatch(name, key, "", "", null, 0m);
+
                 }
 
 
@@ -994,12 +1092,13 @@ if (!string.IsNullOrEmpty(provNorm) && provNorm.Contains("MOMENTUM"))
                                                        })
                                                        .ToList();
 
-                                if (fechaTokens.Count > 0 && pr.FechaRaw is DateTime fecha)
+                                if (fechaTokens.Count > 0 && TryGetDate(pr.FechaRaw, out var fecha))
                                 {
                                     var tokenFecha = fecha.ToString("yyMMdd");
                                     if (fechaTokens.Contains(tokenFecha))
                                         candidatosFinal.Add(pr);
                                 }
+
                             }
                             else
                             {
@@ -1251,8 +1350,9 @@ if (!string.IsNullOrEmpty(provNorm) && provNorm.Contains("MOMENTUM"))
                             {
                                 Documento = name,
                                 CoincidenciaDetectada = textoCoincidenciaFecha
-
                             });
+                            RememberMatch(name, ganadorFecha.Key ?? "", ganadorFecha.RawFra ?? "", ganadorFecha.ProviderNorm ?? "", ganadorFecha.FechaRaw, ganadorFecha.Importe);
+
 
                             if (!string.IsNullOrEmpty(ganadorFecha.Key) && !pdfKeys.ContainsKey(ganadorFecha.Key))
                             {
@@ -1303,6 +1403,8 @@ if (!string.IsNullOrEmpty(provNorm) && provNorm.Contains("MOMENTUM"))
                             Documento = name,
                             CoincidenciaDetectada = textoCoincidenciaExtra
                         });
+                        RememberMatch(name, ganadorConcepto.Key ?? "", ganadorConcepto.RawFra ?? "", ganadorConcepto.ProviderNorm ?? "", ganadorConcepto.FechaRaw, ganadorConcepto.Importe);
+
 
                         if (!string.IsNullOrEmpty(ganadorConcepto.Key) && !pdfKeys.ContainsKey(ganadorConcepto.Key))
                         {
@@ -1381,7 +1483,8 @@ if (!string.IsNullOrEmpty(provNorm) && provNorm.Contains("MOMENTUM"))
                     bool tieneFecha = false;
                     string fechaToken = string.Empty;
 
-                    if (proveedorCorto && ganador.FechaRaw is DateTime fechaDt)
+                    if (proveedorCorto && TryGetDate(ganador.FechaRaw, out var fechaDt))
+
                     {
                         var fechaTokens = Regex.Matches(baseName, @"(?<!\d)(\d{6})(?!\d)")
                                               .Cast<Match>()
@@ -1503,6 +1606,8 @@ if (!string.IsNullOrEmpty(provNorm) && provNorm.Contains("MOMENTUM"))
                         Documento = name,
                         CoincidenciaDetectada = textoCoincidencia
                     });
+                    RememberMatch(name, ganador.Key ?? "", ganador.RawFra ?? "", ganador.ProviderNorm ?? "", ganador.FechaRaw, ganador.Importe);
+
 
                     if (!string.IsNullOrEmpty(ganador.Key) && !pdfKeys.ContainsKey(ganador.Key))
                     {
@@ -1707,50 +1812,115 @@ if (!string.IsNullOrEmpty(provNorm) && provNorm.Contains("MOMENTUM"))
                             // 4) Fecha: yyMMdd exacto en el nombre del PDF
                             bool fechaOk = false;
                             string fechaToken = string.Empty;
-                            if (pr.FechaRaw is DateTime dt4)
+                            if (TryGetDate(pr.FechaRaw, out var dt4))
+
                             {
                                 fechaToken = dt4.ToString("yyMMdd");
                                 if (!string.IsNullOrEmpty(fechaToken))
                                     fechaOk = baseName.Contains(fechaToken, StringComparison.Ordinal);
                             }
 
-                            // Fuerza: importe + al menos otra evidencia REAL (mejor: 2 evidencias)
+                            // --- Excepción MTM: si el proveedor es MTM y el IMPORTE encaja "con todas sus cifras"
+                            // (salvo decimales = 00, que pueden no aparecer en el PDF), entonces SOLO proveedor+importe basta.
+                            bool isMtm = (pr.ProviderNorm ?? "").Equals("MTM", StringComparison.OrdinalIgnoreCase)
+                                         || RemoveDiacritics(pr.ProviderDisplay ?? "").ToUpperInvariant().Contains("MTM");
+
+                            // Importe a mostrar (y a validar estrictamente en MTM)
+                            string impDisplay;
+
+                            if (isMtm)
+                            {
+                                // Excel (Prinex): parte entera + 2 decimales
+                                var impExcel = Math.Abs(Math.Round(pr.Importe, 2));
+                                var intExcel = ((long)Math.Truncate(impExcel)).ToString(CultureInfo.InvariantCulture);
+                                var decExcel = ((int)Math.Round((impExcel - Math.Truncate(impExcel)) * 100m)).ToString("00");
+
+                                // PDF: extraer dígitos del texto detectado (impTxtClean) respetando 2 decimales SOLO si existen
+                                var rawAmt = Regex.Replace(impTxtClean, @"[^0-9.]", "");
+                                var lastDotAmt = rawAmt.LastIndexOf('.');
+
+                                var pdfInt = rawAmt.Replace(".", "");
+                                var pdfDec = "";
+                                var pdfHas2Dec = false;
+
+                                if (lastDotAmt > 0)
+                                {
+                                    var after = rawAmt.Substring(lastDotAmt + 1);
+
+                                    if (after.Length == 2)
+                                    {
+                                        pdfHas2Dec = true;
+                                        pdfDec = after;
+                                        pdfInt = rawAmt.Substring(0, lastDotAmt).Replace(".", "");
+
+                                    }
+                                }
+
+                                bool importeOkMtm;
+                                if (decExcel == "00")
+                                {
+                                    // permite "2420" o "2420.00" (pero NO "2420.10")
+                                    importeOkMtm = pdfInt == intExcel && (!pdfHas2Dec || pdfDec == "00");
+                                    impDisplay = intExcel; // no mostramos ",00"
+                                }
+                                else
+                                {
+                                    // exige 2 decimales exactos (ej: ",20" NO vale ",2")
+                                    importeOkMtm = pdfHas2Dec && pdfInt == intExcel && pdfDec == decExcel;
+                                    impDisplay = $"{intExcel},{decExcel}";
+                                }
+
+                                if (!importeOkMtm)
+                                    continue; // MTM: sin match estricto de importe -> descartado
+                            }
+                            else
+                            {
+                                // resto: display como antes
+                                impDisplay = impPdf.ToString("0.##", new CultureInfo("es-ES"));
+                            }
+
+                            // Fuerza: importe + evidencias (MTM: solo proveedor; resto: >=2 evidencias)
                             int evidencias = 0;
                             if (proveedorOk) evidencias++;
                             if (facturaOk) evidencias++;
                             if (conceptoOk) evidencias++;
                             if (fechaOk) evidencias++;
 
-                            bool coincidenciaFuerte = evidencias >= 2;
+                            bool coincidenciaFuerte = isMtm ? proveedorOk : evidencias >= 2;
 
                             if (coincidenciaFuerte)
                             {
-                                var impDisplay = impPdf.ToString("0.##", new CultureInfo("es-ES"));
-
                                 var partesCoinc = new List<string>
-    {
-        $"<em>{impDisplay}</em> (<strong>importe</strong>)"
-    };
+                                {
+                                    $"<em>{impDisplay}</em> (<strong>importe</strong>)"
+                                };
 
                                 if (proveedorOk)
                                     partesCoinc.Add($"<em>{provMatch}</em> (<strong>proveedor</strong>)");
 
-                                if (conceptoOk)
-                                    partesCoinc.Add($"<em>{conceptMatch}</em> (<strong>concepto</strong>)");
+                                // MTM: SOLO proveedor+importe (nada de concepto/factura/fecha)
+                                if (!isMtm)
+                                {
+                                    if (conceptoOk)
+                                        partesCoinc.Add($"<em>{conceptMatch}</em> (<strong>concepto</strong>)");
 
-                                if (facturaOk)
-                                    partesCoinc.Add($"<em>{matchedFrag}</em> (<strong>factura</strong>)");
+                                    if (facturaOk)
+                                        partesCoinc.Add($"<em>{matchedFrag}</em> (<strong>factura</strong>)");
 
-                                if (fechaOk && !string.IsNullOrEmpty(fechaToken))
-                                    partesCoinc.Add($"<em>{fechaToken}</em> (<strong>fecha</strong>)");
+                                    if (fechaOk && !string.IsNullOrEmpty(fechaToken))
+                                        partesCoinc.Add($"<em>{fechaToken}</em> (<strong>fecha</strong>)");
+                                }
 
                                 string textoCoinc = (partesCoinc.Count == 1 ? "Cadena " : "Cadenas ") + string.Join(", ", partesCoinc);
+
 
                                 result.Coincidencias.Add(new PdfCoincidencia
                                 {
                                     Documento = name,
                                     CoincidenciaDetectada = textoCoinc
                                 });
+                                RememberMatch(name, pr.Key ?? "", pr.RawFra ?? "", pr.ProviderNorm ?? "", pr.FechaRaw, pr.Importe);
+
 
                                 if (!string.IsNullOrEmpty(pr.Key) && !pdfKeys.ContainsKey(pr.Key))
                                     pdfKeys[pr.Key] = name;
@@ -1811,6 +1981,86 @@ if (!string.IsNullOrEmpty(provNorm) && provNorm.Contains("MOMENTUM"))
                     })
                     .ToList();
             }
+            string socKeyPost = string.Empty;
+            if (!string.IsNullOrWhiteSpace(sociedadFiltro))
+            {
+                var s = RemoveDiacritics(sociedadFiltro).Trim().ToUpperInvariant();
+                socKeyPost = s.Length >= 3 ? s.Substring(0, 3) : s;
+            }
+
+
+            bool hasPeriodoPost = TryParsePeriodo(periodoFiltro, out var perYPost, out var perMPost);
+
+
+            if (!string.IsNullOrEmpty(socKey) || hasPeriodo)
+            {
+                // Si vienen filtros pero faltan columnas, mejor fallar claro
+                if (!string.IsNullOrEmpty(socKey) && cSociedad == 0)
+                    throw new InvalidOperationException("Filtro Sociedad informado pero no se encuentra la columna 'Sociedad' en el Excel.");
+                if (hasPeriodo && cFechaFra == 0)
+                    throw new InvalidOperationException("Filtro Periodo informado pero no se encuentra la columna 'Fecha Fra.' en el Excel.");
+
+                var nuevas = new List<PdfCoincidencia>();
+
+                foreach (var c in result.Coincidencias)
+                {
+                    var doc = (c.Documento ?? "").Trim();
+                    if (string.IsNullOrEmpty(doc) || !matchMetaByDoc.TryGetValue(doc, out var meta))
+                    {
+                        nuevas.Add(c);
+                        continue;
+                    }
+
+                    bool okSoc = true;
+                    bool okPer = true;
+
+                    var excelSocDisp = meta.SocietyDisplay ?? "";
+
+                    if (!string.IsNullOrEmpty(socKey))
+                    {
+                        var excelSocNorm = RemoveDiacritics(excelSocDisp).ToUpperInvariant();
+                        okSoc = !string.IsNullOrWhiteSpace(excelSocNorm) && excelSocNorm.Contains(socKey);
+                    }
+
+                    if (hasPeriodo)
+                    {
+                        okPer = TryGetDate(meta.FechaRaw, out var dt) && dt.Year == perY && dt.Month == perM;
+                    }
+
+                    if (okSoc && okPer)
+                    {
+                        nuevas.Add(c);
+                        continue;
+                    }
+
+                    // Mover a faltantes con motivo(s)
+                    var motivos = new List<string>();
+
+                    if (!okSoc)
+                        motivos.Add($"sociedad <em>{(string.IsNullOrWhiteSpace(excelSocDisp) ? "-" : excelSocDisp)}</em>");
+
+                    if (!okPer)
+                    {
+                        string fechaTxt = "-";
+                        if (TryGetDate(meta.FechaRaw, out var dt2)) fechaTxt = dt2.ToString("MM/yyyy");
+                        else if (meta.FechaRaw != null) fechaTxt = Convert.ToString(meta.FechaRaw) ?? "-";
+
+                        motivos.Add($"fecha <em>{fechaTxt}</em>");
+                    }
+
+                    result.Faltantes.Add($"{doc} → Excluido por {string.Join(" y ", motivos)}");
+
+                    // Si esa coincidencia había “taponado” la key para que no saliera "En Prinex pero sin PDF", destápala
+                    if (!string.IsNullOrEmpty(meta.Key) &&
+                        pdfKeys.TryGetValue(meta.Key, out var mapped) &&
+                        mapped.Equals(doc, StringComparison.OrdinalIgnoreCase))
+                    {
+                        pdfKeys.Remove(meta.Key);
+                    }
+                }
+
+                result.Coincidencias = nuevas;
+            }
 
             // ==== En Prinex pero sin PDF (no se toca la forma de construcción) ====
             foreach (var kv in prinex)
@@ -1826,16 +2076,7 @@ if (!string.IsNullOrEmpty(provNorm) && provNorm.Contains("MOMENTUM"))
 
         }
 
-        // Sobrecarga para compatibilidad con la llamada que pasa SociedadFiltro
-        private static PreviewPdfDto BuildPreviewFromPdfNamesAndExcel(
-            byte[] excelBytes,
-            List<CuadreFile> pdfFiles,
-            string? _ /*sociedadFiltro*/)
-        {
-            // De momento ignoramos el filtro y reutilizamos la lógica principal
-            return BuildPreviewFromPdfNamesAndExcel(excelBytes, pdfFiles);
-        }
-
+        
         private static string? SimpleInvoiceKey(string? text)
         {
             if (string.IsNullOrWhiteSpace(text))
@@ -1958,7 +2199,8 @@ if (!string.IsNullOrEmpty(provNorm) && provNorm.Contains("MOMENTUM"))
 
                 // --- fecha (yyMMdd en el nombre del PDF) ---
                 string? fechaTok = null;
-                if (pr.FechaRaw is DateTime dt)
+                if (TryGetDate(pr.FechaRaw, out var dt))
+
                 {
                     var tok = dt.ToString("yyMMdd");
                     if (baseName.IndexOf(tok, StringComparison.OrdinalIgnoreCase) >= 0)
@@ -2250,10 +2492,75 @@ if (!string.IsNullOrEmpty(provNorm) && provNorm.Contains("MOMENTUM"))
 
         private static bool IsSameMonth(object dt, int y, int m)
         {
-            if (dt is DateTime dd) return dd.Year == y && dd.Month == m;
-            if (DateTime.TryParse(Convert.ToString(dt), out var d2)) return d2.Year == y && d2.Month == m;
+            if (TryGetDate(dt, out var dd)) return dd.Year == y && dd.Month == m;
             return false;
         }
+
+        private static bool TryGetDate(object? raw, out DateTime dt)
+        {
+            dt = default;
+            if (raw is null) return false;
+
+            if (raw is DateTime d)
+            {
+                dt = d;
+                return true;
+            }
+
+            // ClosedXML a veces devuelve OADate (double)
+            if (raw is double oa)
+            {
+                try
+                {
+                    dt = DateTime.FromOADate(oa);
+                    return true;
+                }
+                catch { }
+            }
+
+            var s = Convert.ToString(raw);
+            return DateTime.TryParse(s, out dt);
+        }
+
+        private static bool TryParsePeriodo(string? periodo, out int year, out int month)
+        {
+            year = 0;
+            month = 0;
+
+            if (string.IsNullOrWhiteSpace(periodo))
+                return false;
+
+            var p = periodo.Trim();
+
+            // Acepta "MM/YYYY" o "M/YYYY"
+            var m1 = Regex.Match(p, @"^(?<m>\d{1,2})\s*/\s*(?<y>\d{4})$");
+            if (m1.Success)
+            {
+                if (int.TryParse(m1.Groups["m"].Value, out month) &&
+                    int.TryParse(m1.Groups["y"].Value, out year) &&
+                    month >= 1 && month <= 12)
+                    return true;
+
+                year = 0; month = 0;
+                return false;
+            }
+
+            // Acepta "YYYY-MM"
+            var m2 = Regex.Match(p, @"^(?<y>\d{4})\s*-\s*(?<m>\d{1,2})$");
+            if (m2.Success)
+            {
+                if (int.TryParse(m2.Groups["y"].Value, out year) &&
+                    int.TryParse(m2.Groups["m"].Value, out month) &&
+                    month >= 1 && month <= 12)
+                    return true;
+
+                year = 0; month = 0;
+                return false;
+            }
+
+            return false;
+        }
+
 
         private static string RemoveDiacritics(string s)
         {
