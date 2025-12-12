@@ -3,6 +3,8 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components
 @using System.Text
+@using System.Text.RegularExpressions
+
 @inject HttpClient Http
 @inject IJSRuntime JS
 
@@ -160,7 +162,9 @@
                     <thead class="table-warning">
                         <tr>
                             <th>Documento</th>
-                            <th>Posibles motivos de la ausencia de hallazgos</th>
+                            <th>
+                                Coincidencias insuficientes
+                            </th>
                         </tr>
                     </thead>
                     <tbody>
@@ -169,7 +173,7 @@
                             var f = ParseFaltante(raw);
                             <tr>
                                 <td title="@f.Documento">@ShortDoc(f.Documento)</td>
-                                <td>@f.Motivo</td>
+                                <td>@FormatFaltante(f.Motivo)</td>
                             </tr>
                         }
                     </tbody>
@@ -225,15 +229,23 @@
         if (string.IsNullOrWhiteSpace(txt))
             return default;
 
-        // Añadimos negrita sólo dentro de los paréntesis
-        var s = txt
-    .Replace("(factura)", "<strong>(factura)</strong>")
-    .Replace("(proveedor)", "<strong>(proveedor)</strong>")
-    .Replace("(fecha)", "<strong>(fecha)</strong>");
+        // El texto ya viene con <em>…</em> y (<strong>tipo</strong>) desde la Function
+        return (MarkupString)txt;
 
 
-        return (MarkupString)s;
+
     }
+
+    private static MarkupString FormatFaltante(string? txt)
+    {
+        if (string.IsNullOrWhiteSpace(txt))
+            return default;
+
+        // Igual que en coincidencias: respetamos el HTML que ya viene de la Function
+        return (MarkupString)txt;
+    }
+
+
 
     private static string ShortDoc(string? name)
     {
@@ -694,6 +706,25 @@
 
         .page-Cuadrepdfprinex .df-btn-procesar {
             min-width: 150px;
+        }
+        /* Estilo unificado para Coincidencias y Faltantes */
+        .page-Cuadrepdfprinex .df-table-coinc td {
+            color: #e5e7eb;
+            font-size: 0.95rem;
+            font-weight: 400;
+        }
+
+        /* Cadenas: cursiva, mismo estilo arriba y abajo */
+        .page-Cuadrepdfprinex .df-table-coinc em {
+            font-style: italic;
+            font-weight: 400;
+            color: #f9fafb;
+        }
+
+        /* Tipos (factura/proveedor/importe/concepto): negrita uniforme */
+        .page-Cuadrepdfprinex .df-table-coinc strong {
+            font-weight: 600;
+            color: #ffffff;
         }
 
 </style>
