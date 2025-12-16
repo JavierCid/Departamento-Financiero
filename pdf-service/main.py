@@ -29,11 +29,14 @@ app.add_middleware(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:7252",
-        "https://localhost:7252",
-        "http://127.0.0.1:7252",
-        "https://127.0.0.1:7252",
-    ],
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
+    "http://localhost:7252",
+    "https://localhost:7252",
+    "http://127.0.0.1:7252",
+    "https://127.0.0.1:7252",
+],
+
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

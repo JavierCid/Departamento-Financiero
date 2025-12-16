@@ -1,0 +1,989 @@
+﻿/* =========================
+   Momentum RE — app.css
+   ========================= */
+
+/* ====== Variables ====== */
+:root {
+    --df-bg: #0f172a; /* fondo 1 (oscuro)   */
+    --df-bg2: #0b1224; /* fondo 2 (oscuro)   */
+    --df-header: #1B202C; /* barra navbar (logo)*/
+    --df-surface: #101828; /* tarjetas oscuras   */
+    --df-primary: #4e8fff; /* azul botón         */
+    --df-primary-2: #2e6dee;
+
+
+    --df-text: #e8ecff; /* texto principal    */
+    --df-muted: #a9b3d4; /* texto secundario   */
+    --df-border: rgba(255,255,255,.10);
+    --df-shadow: 0 12px 30px rgba(0,0,0,.30);
+}
+
+/* ====== Reset ====== */
+* {
+    box-sizing: border-box
+}
+
+html, body {
+    height: 100%
+}
+
+body {
+    margin: 0;
+    font-family: "Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,"Noto Sans";
+    color: var(--df-text);
+    background: linear-gradient(180deg,var(--df-bg) 0%, var(--df-bg2) 70%, #0a1020 100%);
+}
+
+/* ====== App Layout ====== */
+.df-app {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column
+}
+
+.df-main {
+    flex: 1;
+    padding: 25px 18px 24px; /* 10px menos arriba → títulos más cerca de la barra */
+}
+
+
+
+/* ===== Navbar compacto + Logo grande (proporcional) ===== */
+
+/* Barra con altura contenida */
+.df-header {
+    background: var(--df-header);
+    border-bottom: 1px solid var(--df-border);
+    box-shadow: 0 8px 24px rgba(0,0,0,.25);
+    overflow: visible; /* deja que el logo sobresalga un poco */
+}
+
+/* Fila compacta: ~56px de alto visual */
+.df-header__inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 8px 22px; /* <— reduce alto de barra */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 65px;
+}
+
+/* Logo 20% más grande y SIEMPRE proporcional */
+.df-logo {
+    height: 55px; /* +15% */
+    
+    width: auto;
+    object-fit: contain;
+    display: block;
+    margin-top: -8px;
+    margin-bottom: -10px;
+    /* Mejora visual y nitidez */
+    filter: contrast(1.25) saturate(1) brightness(1);
+}
+
+
+
+/* Texto de marca, sin “estirar” la fila */
+.df-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 25px;
+    text-decoration: none;
+    color: #e8efff;
+    font-weight: 600;
+    letter-spacing: .2px;
+    line-height: 1;
+    margin-left: 15px; /* empuja logo + texto un pelín a la izquierda */
+}
+
+/* Links del menú: más finos para compactar */
+.df-nav {
+    display: flex;
+    gap: 8px;
+}
+
+.df-nav__link {
+    color: #d8e3ff;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 16px; /* un pelín menor */
+    padding: 10px 10px; /* <— menos alto */
+    border-radius: 10px;
+    border: 1.5px solid transparent;
+    transition: .18s ease;
+}
+
+    .df-nav__link:hover {
+        border-color: rgba(255,255,255,.18);
+        background: rgba(255,255,255,.06);
+    }
+
+    .df-nav__link.active {
+        background: rgba(255,255,255,.12);
+        border-color: rgba(255,255,255,.22);
+    }
+
+
+/* ====== Hero ====== */
+.df-hero {
+    position: relative; /* necesario para el ::after */
+    background: radial-gradient(1200px 300px at 20% 0%, rgba(255,255,255,.10) 0%, rgba(255,255,255,0) 60%), linear-gradient(180deg, rgba(255,255,255,.06) 0%, rgba(255,255,255,.03) 100%), linear-gradient(90deg, var(--df-bg) 0%, var(--df-bg2) 100%);
+    border: 1px solid var(--df-border);
+    border-radius: 16px;
+    box-shadow: var(--df-shadow);
+}
+
+
+.df-hero__content {
+    padding: 35px 28px
+}
+
+.df-hero h1 {
+    margin: 0 0 12px;
+    font-size: 44px;
+    line-height: 1.1;
+    background: linear-gradient(90deg, #e5ebff 0%, #ced9ff 60%, #a7c2ff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: #e5ebff;
+    text-shadow: 0 2px 6px rgba(0,0,0,.25);
+}
+
+.df-hero p {
+    margin: 0;
+    color: #cfd8f2; /* un tono más claro */
+    font-size: 18px;
+    text-shadow: 0 1px 3px rgba(0,0,0,.35);
+}
+
+.df-hero__cta {
+    margin-top: 35px;
+    display: flex;
+    gap: 12px
+}
+/* ====== Icono del encabezado ====== */
+.df-hero__icon {
+    width: 120px;
+    height: 120px;
+    color: #6d9dfc; /* 🔹 Mismo azul que los íconos inferiores */
+    filter: drop-shadow(0 0 6px rgba(109, 157, 252, 0.25));
+    opacity: 0.9;
+    transition: transform 0.3s ease, filter 0.3s ease;
+}
+
+    .df-hero__icon:hover {
+        transform: scale(1.5);
+        filter: drop-shadow(0 0 10px rgba(109, 157, 252, 0.4));
+        opacity: 1;
+    }
+
+/* ====== Botones ====== */
+.btn-primary, .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 18px;
+    border-radius: 12px;
+    text-decoration: none;
+    font-weight: 750;
+    transition: transform .06s ease, box-shadow .2s ease, background .2s ease;
+    border: 1px solid transparent;
+}
+
+.btn-primary {
+    position: relative;
+    color: #fff;
+    border: 0;
+    outline: 0;
+    overflow: hidden;
+    /* azul más oscuro → texto "Procesar" se lee mejor */
+    background: linear-gradient(90deg,#2554d4 0%,#1d3ea8 100%);
+    background-clip: padding-box; /* elimina reborde feo del gradiente */
+    box-shadow: 0 6px 18px rgba(23,60,160,.45);
+    /* texto menos “emborronado” */
+    font-size: 1.1rem; /* un pelín más pequeño */
+    font-weight: 300; /* menos negrita que el default */
+    letter-spacing: 0.02em; /* separa ligeramente las letras */
+}
+
+
+
+    .btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 10px 28px rgba(78,143,255,.42)
+    }
+
+    .btn-primary:focus, .btn-primary:active {
+        outline: 0;
+        border: 0;
+        box-shadow: 0 0 0 .2rem rgba(78,143,255,.25)
+    }
+
+.btn-ghost {
+    background: #fff;
+    color: #2a3354;
+    border-color: rgba(255,255,255,.25)
+}
+
+    .btn-ghost:hover {
+        background: #f7f9ff
+    }
+
+/* ====== Cards / Features ====== */
+.df-grid {
+    margin-top: 24px;
+    display: grid;
+    gap: 18px;
+    grid-template-columns: repeat(3,minmax(0,1fr))
+}
+
+@media (max-width:992px) {
+    .df-grid {
+        grid-template-columns: 1fr 1fr
+    }
+}
+
+@media (max-width:640px) {
+    .df-grid {
+        grid-template-columns: 1fr
+    }
+}
+
+.df-card {
+    background: var(--df-surface);
+    border: 1px solid var(--df-border);
+    border-radius: 14px;
+    box-shadow: var(--df-shadow);
+    padding: 18px;
+}
+
+    .df-card h3 {
+        margin: 6px 0 8px;
+        font-size: 18px;
+        color: #f2f5ff
+    }
+
+    .df-card p {
+        margin: 0;
+        color: #c6ccea
+    }
+
+/* ====== Footer ====== */
+.df-footer {
+    text-align: center;
+    color: #9aa6d1;
+    font-size: 13px;
+    padding: 10px 10px 14px;
+    border-top: 1px solid var(--df-border);
+    background: transparent;
+}
+
+/* ====== Valores (opcional) ====== */
+.df-values {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 28px;
+    background: #121826;
+    border-radius: 16px;
+    padding: 15px 15px;
+    margin-top: 190px;
+    box-shadow: var(--df-shadow);
+}
+
+.df-value {
+    text-align: center;
+    color: #e8ecff;
+}
+
+/* Pastilla + icono SVG futurista */
+.df-value-icon {
+    position: relative;
+    width: 88px;
+    height: 88px;
+    border-radius: 26px;
+    margin: 0 auto 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+    /* Glow de la pastilla (debajo del icono) */
+    .df-value-icon::before {
+        content: "";
+        position: absolute;
+        border-radius: inherit;
+        /* Fondo mucho más oscuro, casi plano */
+        background: radial-gradient(circle at 30% 20%, rgba(91, 156, 255, 0.25) 0, rgba(91, 156, 255, 0) 55%), radial-gradient(circle at 70% 80%, rgba(91, 156, 255, 0.18) 0, rgba(91, 156, 255, 0) 55%), #020617;
+        /* Glow reducido */
+        box-shadow: 0 0 12px rgba(91, 156, 255, 0.45);
+        z-index: 0;
+    }
+
+/* SVG del icono, bien grande por encima */
+.df-value-svg {
+    position: relative;
+    z-index: 1;
+    width: 550px;
+    height: 550px;
+    /* mismo tono que el azul corporativo */
+    stroke: var(--df-primary);
+    stroke-width: 1;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+    /* glow suave, no “fosforito” */
+    filter: drop-shadow(0 0 0px rgba(78, 143, 255, 0.7));
+}
+
+
+.df-value h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.df-value p {
+    font-size: 15px;
+    color: #a7b1d0;
+}
+
+@media (max-width: 768px) {
+    .df-values {
+        grid-template-columns: 1fr;
+        padding: 28px 20px;
+    }
+}
+
+/* ====== Tabla/Preview (página PDFs) ====== */
+.table {
+    color: #dfe6ff
+}
+
+    .table thead, .table thead th {
+        background: #0f1a32;
+        color: #cfe0ff;
+        border-color: var(--df-border)
+    }
+
+    .table td, .table th {
+        border-color: var(--df-border)
+    }
+
+.alert-success {
+    background: rgba(56,142,60,.12);
+    color: #b7f0c0;
+    border: 1px solid rgba(56,142,60,.35)
+}
+
+.alert-danger {
+    background: rgba(183,28,28,.12);
+    color: #ffc0c0;
+    border: 1px solid rgba(183,28,28,.35)
+}
+
+/* ====== Ocultar banner de error de Blazor ====== */
+#blazor-error-ui {
+    display: none !important
+}
+
+/* ====== Uploader & Dropzone (unificado) ====== */
+.df-uploader {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin: 10px 0 14px;
+}
+
+.df-filepick {
+    position: relative;
+    display: inline-block
+}
+
+.df-filebtn {
+    min-width: 260px;
+    font-size: 1rem; /* un poco más grande */
+    font-weight: 400; /* quita la negrita del botón de selección */
+}
+
+/* el input invisible recibe el click */
+.df-filepick input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+}
+
+/* ===== Dropzone elegante (PDFs) ===== */
+.df-drop {
+    position: relative;
+    border: 1px dashed rgba(255,255,255,.18);
+    border-radius: 16px;
+    background: radial-gradient(800px 180px at 20% 0%, rgba(255,255,255,.06) 0%, rgba(255,255,255,0) 70%), linear-gradient(180deg, rgba(255,255,255,.04) 0%, rgba(255,255,255,.02) 100%);
+    padding: 36px 28px;
+    text-align: center;
+    color: #cfe0ff;
+    margin: 14px 0 10px;
+    transition: box-shadow .18s ease, border-color .18s ease, background .18s ease;
+    box-shadow: 0 10px 28px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.06);
+}
+.df-drop--hero {
+    width: 100%;
+    max-width: 1270px;
+    height: 110px; /* más bajo */
+    margin-top: 1.5rem; /* separación superior */
+    margin-left: 0; /* alineado a la izquierda */
+    border-radius: 0.75rem;
+    border: 1px dashed rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.05);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    transition: all 0.25s ease;
+    box-sizing: border-box;
+}
+
+
+    .df-drop--hero.drag {
+        border-color: #2563eb;
+        background: rgba(37,99,235,0.08);
+        box-shadow: 0 0 30px rgba(37,99,235,0.25);
+    }
+
+.df-drop__icon i {
+    font-size: 2rem;
+    opacity: 0.9;
+    margin-bottom: 0.5rem;
+}
+
+.df-drop__title {
+    font-weight: 600;
+    color: #e2e8f0;
+}
+
+.df-drop__hint {
+    font-size: 0.9rem;
+    color: #94a3b8;
+}
+
+
+/* Estados: hover/drag resaltado corporativo */
+.df-drop:hover,
+.df-drop.drag {
+    border-color: rgba(78,143,255,.35);
+    box-shadow: 0 12px 32px rgba(78,143,255,.22), inset 0 1px 0 rgba(255,255,255,.08);
+    background: radial-gradient(900px 200px at 22% 0%, rgba(78,143,255,.10) 0%, rgba(78,143,255,0) 70%), linear-gradient(180deg, rgba(255,255,255,.05) 0%, rgba(255,255,255,.03) 100%);
+    color: #eef4ff;
+}
+
+/* Input ocupa todo y hace clic en cualquier parte */
+.df-drop__input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+    .df-drop {
+        padding: 28px 18px;
+    }
+
+    .df-drop__icon {
+        width: 52px;
+        height: 52px;
+    }
+}
+
+
+/* Listado breve de archivos */
+.df-files {
+    margin-top: 8px;
+    color: #cfd7ff;
+    font-size: .95rem
+}
+
+    .df-files .item {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis
+    }
+
+    /* Título legible sobre pill */
+    .df-preview h5 {
+        color: #eaf1ff;
+        background: rgba(255,255,255,.10);
+        border: 1px solid rgba(255,255,255,.14);
+        padding: 6px 10px;
+        border-radius: 10px;
+        display: inline-block;
+        letter-spacing: .2px;
+        margin-bottom: 12px;
+    }
+
+    /* Tabla oscura con mejor contraste y texto compacto */
+    .df-preview .table {
+        color: #e9efff;
+        background: transparent;
+        margin-bottom: 12px;
+        border-radius: 10px;
+        overflow: hidden;
+        border-color: rgba(255,255,255,.12);
+        font-size: 14px !important; /* ↓ reducido 4 unidades */
+        line-height: 1.25;
+    }
+
+        /* Cabecera sólida */
+        .df-preview .table thead th {
+            background: #1f3564;
+            color: #ffffff;
+            border-color: rgba(255,255,255,.16);
+            text-align: left;
+            padding: 8px 12px; /* un poco más compacto */
+            font-size: 14px !important;
+            line-height: 1.25;
+        }
+
+        /* Celdas con padding ajustado */
+        .df-preview .table td {
+            padding: 8px 12px;
+            font-size: 14px !important;
+        }
+
+            /* Respiro en bordes laterales */
+            .df-preview .table thead th:first-child,
+            .df-preview .table td:first-child {
+                padding-left: 16px;
+            }
+
+            .df-preview .table thead th:last-child,
+            .df-preview .table td:last-child {
+                padding-right: 16px;
+            }
+
+    /* Alternancia marcada */
+    .df-preview .table-striped > tbody > tr:nth-of-type(odd) > * {
+        background-color: rgba(255,255,255,.06);
+        color: #e9efff; /* mismo color que IVA/IRPF */
+    }
+
+
+    .df-preview .table-striped > tbody > tr:nth-of-type(even) > * {
+        background-color: rgba(0,0,0,.12);
+    }
+
+    /* Hover sutil corporativo */
+    .df-preview .table-hover tbody tr:hover > * {
+        background-color: rgba(78,143,255,.14);
+    }
+
+    /* Bordes definidos */
+    .df-preview .table td,
+    .df-preview .table th {
+        border-color: rgba(255,255,255,.18);
+    }
+
+    /* Alinear importes a la izquierda (incluye IVA €) */
+    .df-preview .text-end {
+        text-align: left !important;
+        color: #e9efff;
+        font-variant-numeric: tabular-nums;
+    }
+    /* Enlaces dentro de filas impares: mismo color que el texto */
+    .df-preview .table-striped > tbody > tr:nth-of-type(odd) a {
+        color: #e9efff !important;
+    }
+
+    /* En general, que los enlaces hereden el color de la celda */
+    .df-preview .table a {
+        color: inherit;
+        text-decoration: underline;
+    }
+    /* Encabezado de sección “Vista previa / Resumen de comparación” en UploadExcel */
+    .upload-summary h5,
+    .upload-summary .section-title,
+    .df-preview h5 {
+        color: #eaf1ff;
+        background: rgba(255,255,255,.10);
+        border: 1px solid rgba(255,255,255,.14);
+        padding: 6px 10px;
+        border-radius: 10px;
+        display: inline-block;
+        letter-spacing: .2px;
+        margin-bottom: 12px;
+    }
+/* === Marca/ícono en el hero (arriba-derecha) === */
+.df-hero {
+    position: relative;
+}
+/* asegura contexto para posicionar dentro */
+
+.df-hero__mark {
+    position: absolute;
+    top: 2.5%; /* sube bastante más */
+    right: 50px; /* eje X perfecto */
+    width: 220px; /* un pelín más grande */
+    height: 220px;
+    background-image: url("/Images/icono-departamento-financier.png");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    opacity: 0.9; /* más visible */
+    pointer-events: none;
+    z-index: 2;
+    filter: invert(42%) sepia(98%) saturate(4800%) hue-rotate(180deg) brightness(105%) contrast(103%);
+}
+
+
+
+
+
+/* ==== Alineación columnas Contraste Prinex ==== */
+table.table thead th {
+    text-align: left !important;
+    padding-left: 18px; /* ajusta la cabecera un poco a la derecha */
+}
+
+table.table tbody td {
+    padding-left: 18px; /* iguala el contenido con la cabecera */
+}
+
+
+/* === 1) Página un poco más ancha (afecta a todo el contenido) === */
+/* tamaño “estrecho” elegante */
+.df-container {
+    max-width: 1180px; /* 1100–1200 queda muy bien */
+    width: min(1080px, 94vw); /* respeta el viewport en pantallas pequeñas */
+    margin: 0 auto; /* centrado */
+    padding: 0 16px; /* un poco de aire a los lados */
+}
+
+
+/* =======================
+   VISTA PREVIA (centrada, sin desbordes)
+   ======================= */
+.df-preview {
+    max-width: 1250px; /* más ancho, pero controlado */
+    width: 100%;
+    margin: 0 auto; /* centrado */
+    padding: 16px 22px; /* acolchado del recuadro */
+    background: rgba(255,255,255,.04);
+    border-radius: 14px;
+    box-sizing: border-box;
+    overflow-x: auto; /* fallback si algún dato se resiste */
+}
+
+    /* Tabla dentro de la vista previa */
+    .df-preview .table {
+        width: 100%;
+        table-layout: auto;
+        border-collapse: collapse;
+        font-size: 0.90rem; /* un pelín menor para que quepa todo */
+    }
+
+        /* Celdas: una sola línea + “...” */
+        .df-preview .table th,
+        .df-preview .table td {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.25;
+            padding: 10px 12px;
+        }
+
+        /* ---- Anchos por columna (ajústalos si quieres) ---- */
+        /* 1) Archivo */
+        .df-preview .table thead th:nth-child(1),
+        .df-preview .table tbody td:nth-child(1) {
+            max-width: 200px;
+        }
+
+        /* 2) Proveedor */
+        .df-preview .table thead th:nth-child(2),
+        .df-preview .table tbody td:nth-child(2) {
+            max-width: 180px;
+        }
+
+        /* 3) Fecha */
+        .df-preview .table thead th:nth-child(3),
+        .df-preview .table tbody td:nth-child(3) {
+            max-width: 100px;
+        }
+
+        /* 4) Invoice */
+        .df-preview .table thead th:nth-child(4),
+        .df-preview .table tbody td:nth-child(4) {
+            max-width: 120px;
+        }
+
+        /* 5) Concepto (backend ya limita a 20/30 chars; aquí damos aire) */
+        .df-preview .table thead th:nth-child(5),
+        .df-preview .table tbody td:nth-child(5) {
+            max-width: 420px;
+        }
+
+        /* 6–9) Importes compactos */
+        .df-preview .table thead th:nth-child(6),
+        .df-preview .table tbody td:nth-child(6),
+        .df-preview .table thead th:nth-child(7),
+        .df-preview .table tbody td:nth-child(7),
+        .df-preview .table thead th:nth-child(8),
+        .df-preview .table tbody td:nth-child(8),
+        .df-preview .table thead th:nth-child(9),
+        .df-preview .table tbody td:nth-child(9) {
+            max-width: 110px;
+        }
+
+        /* Enlaces con ellipsis también */
+        .df-preview .table td a {
+            display: inline-block;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+/* === BankFlow Pro: espaciados finos === */
+.bankflow .df-  load { /* separa inputs entre sí y del botón */
+    margin-bottom: 10px;
+}
+
+.bankflow .bf-actions { /* espacio arriba del botón y abajo hacia el banner */
+    margin-top: 12px; /* separa del "(Opcional) ..." */
+    margin-bottom: 14px; /* separa del "Procesamiento exitoso" */
+}
+
+.bankflow .alert-success { /* más aire alrededor del banner */
+    margin-top: 6px;
+    margin-bottom: 16px;
+}
+
+.bankflow h4 { /* separa "Vista previa de resultados" del banner */
+    margin-top: 8px;
+}
+/* === Banner BankFlow Pro === */
+.alert-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px; /* ← aire interior */
+    border-radius: 12px; /* ← menos cuadrado */
+}
+
+    .alert-pill .bi {
+        font-size: 1rem;
+    }
+
+/* ===================================
+   Estilo para botones de subida (label)
+   =================================== */
+.btn-file {
+    /* Apariencia de botón */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem; /* Espacio si usas icono */
+    cursor: pointer;
+    width: 100%; /* Ocupa el ancho de la caja */
+    /* Estilo "oscuro y sobrio" (usa los colores de tus tarjetas) */
+    background: var(--df-surface);
+    color: var(--df-muted);
+    border: 1px solid var(--df-border);
+    /* Estilo compacto */
+    padding: 9px 16px;
+    font-size: 1.05rem; /* un poco más grande */
+    font-weight: 400; /* sin negrita */
+    /* Transiciones y bordes */
+    border-radius: 10px;
+    transition: background-color 0.2s ease, color 0.2s ease;
+    /* Separación respecto a la línea superior */
+    margin-top: 0.35rem;
+}
+
+
+
+    .btn-file:hover {
+        /* Un poco más claro al pasar el ratón */
+        background: var(--df-header);
+        color: var(--df-text);
+        border-color: rgba(255,255,255,.18);
+    }
+    .bankflow .df-upload-remesa {
+    margin-top: 0.75rem; /* separa todo el bloque de la dropzone superior */
+    }
+
+    .bankflow .df-upload-remesa > label {
+        display: block;
+        margin-top: 0.25rem; /* separación extra respecto al extracto */
+        margin-bottom: 0rem; /* separación texto → dropzone */
+    }
+
+
+/* Oculta el input original y el texto "Ningún archivo seleccionado" */
+.bankflow input[type="file"] {
+    display: none;
+}
+
+/* ===================================
+   Estilo para botones de tarjeta (Sober)
+   =================================== */
+.btn-card {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 20px;
+    border-radius: 14px;
+    text-decoration: none;
+    font-weight: 600;
+    cursor: pointer;
+    /* Contraste más equilibrado */
+    background: linear-gradient(180deg, #2c3a5c 0%, #1c2740 100%);
+    color: #e7ebf9;
+    border: 1px solid rgba(255,255,255,.22);
+    box-shadow: 0 12px 12px rgba(0,0,0,.35);
+    transition: background .2s ease, transform .08s ease, box-shadow .2s ease, border-color .2s ease;
+}
+
+    .btn-card:hover {
+        background: linear-gradient(180deg, #34466b 0%, #222f4b 100%);
+        color: #ffffff;
+        border-color: rgba(255,255,255,.30);
+        transform: translateY(-1px);
+        box-shadow: 0 8px 20px rgba(0,0,0,.4);
+    }
+
+
+/* separación normal con el uploader */
+.prinex-head {
+    position: relative;
+}
+
+    .prinex-head h3 {
+        margin-bottom: 7px;
+    }
+.prinex-logo {
+    position: absolute;
+    top: -53px; /* más arriba */
+    right: 35px; /* más hacia la derecha */
+    width: 210px !important;
+    height: auto !important;
+    object-fit: contain;
+    filter: drop-shadow(0 0 2px rgba(140, 190, 255, 0.1)) brightness(1.15) saturate(1.1);
+    pointer-events: none;
+    user-select: none;
+}
+
+@media (max-width: 900px) {
+    .prinex-logo {
+        top: -10px;
+        right: 40px;
+        width: 130px !important;
+    }
+}
+.prinex-desc {
+    color: #a5b4fc;
+    font-size: rem;
+    margin-top: 0rem;
+}
+
+/* ===== Logo BankFlow Pro ===== */
+.bankflow-head {
+    position: relative;
+}
+
+    .bankflow-head h2 {
+        font-size: 26px; /* mismo tamaño que PDF */
+        font-weight: 600;
+        margin-bottom: -10px; /* hueco pequeño con la descripción */
+    }
+
+.bankflow-description {
+    color: #a5b4fc;
+    margin-top: -10px;
+}
+
+
+
+.bankflow-logo {
+    position: absolute;
+    top: -95px; /* súbelo/bájalo fino aquí */
+    right: 20px; /* muévelo más a la derecha/izquierda */
+    width: 270px !important; /* tamaño “grande” (como Prinex) */
+    height: auto !important;
+    object-fit: contain;
+    filter: drop-shadow(0 0 2px rgba(140, 190, 255, 0.1)) brightness(1.15) saturate(1.1);
+    pointer-events: none;
+    user-select: none;
+}
+
+@media (max-width: 900px) {
+    .bankflow-logo {
+        top: -10px;
+        right: 40px;
+        width: 130px !important;
+    }
+}
+/* ===== PDF Flow (Procesador de facturas) ===== */
+.pdf-head {
+    position: relative;
+}
+
+    .pdf-head h2 {
+        font-size: 26px;
+        font-weight: 600;
+        margin-bottom: 2px; /* título más pegado al texto */
+    }
+
+.pdf-desc {
+    color: #a5b4fc;
+    margin-top: -10px; /* reduce aún más el hueco */
+}
+
+.pdf-logo {
+    position: absolute;
+    top: -40px; /* ajusta altura para que flote igual que BankFlow */
+    right: 60px; /* igual que los demás */
+    width: 195px !important;
+    height: auto !important;
+    object-fit: contain;
+    filter: drop-shadow(0 0 2px rgba(140, 190, 255, 0.1)) brightness(1.15) saturate(1.1);
+    pointer-events: none;
+    user-select: none;
+}
+
+@media (max-width: 900px) {
+    .pdf-logo {
+        top: -10px;
+        right: 40px;
+        width: 130px !important;
+    }
+}
+/* Ajuste fino: icono central un pelín más abajo */
+.df-value-icon--middle {
+    transform: translateY(4px);
+}
+
+/* Manita sobre todos los botones clicables */
+button,
+.btn {
+    cursor: pointer;
+}
+/* PDFFlow – mensajes y vista previa */
+.df-alert {
+    margin-top: 1.5rem;
+    margin-bottom: 0;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.75rem;
+    border: none;
+    font-weight: 500;
+}
+
+.df-preview {
+    margin-top: 1.5rem;
+    border-radius: 0.75rem;
+}
